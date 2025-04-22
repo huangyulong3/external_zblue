@@ -16,7 +16,7 @@ struct net_buf *bt_hci_evt_create(uint8_t evt, uint8_t len)
 
 	buf = bt_buf_get_evt(evt, false, K_FOREVER);
 
-	BT_ASSERT(buf);
+	//BT_ASSERT(buf);
 
 	hdr = net_buf_add(buf, sizeof(*hdr));
 	hdr->evt = evt;

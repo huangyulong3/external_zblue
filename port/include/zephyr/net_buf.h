@@ -1524,7 +1524,7 @@ struct net_buf * __must_check net_buf_slist_get(sys_slist_t *list);
  * @param fifo Which FIFO to put the buffer to.
  * @param buf Buffer.
  */
-__deprecated void net_buf_put(struct k_fifo *fifo, struct net_buf *buf);
+void net_buf_put(struct k_fifo *fifo, struct net_buf *buf);
 
 /**
  * @brief Decrements the reference count of a buffer.

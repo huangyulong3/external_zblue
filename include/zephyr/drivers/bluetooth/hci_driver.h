@@ -162,7 +162,7 @@ struct bt_hci_driver {
  *
  * @deprecated Use the new HCI driver interface instead: @ref bt_hci_api
  */
-__deprecated int bt_hci_driver_register(const struct bt_hci_driver *drv);
+int bt_hci_driver_register(const struct bt_hci_driver *drv);
 
 /**
  * @brief Setup the HCI transport, which usually means to reset the

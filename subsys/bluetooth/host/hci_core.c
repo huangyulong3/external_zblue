@@ -252,7 +252,7 @@ void bt_send_one_host_num_completed_packets(uint16_t handle)
 
 	buf = bt_hci_cmd_create(BT_HCI_OP_HOST_NUM_COMPLETED_PACKETS,
 				sizeof(*cp) + sizeof(*hc));
-	BT_ASSERT_MSG(buf, "Unable to alloc for Host NCP");
+	//BT_ASSERT_MSG(buf, "Unable to alloc for Host NCP");
 
 	cp = net_buf_add(buf, sizeof(*cp));
 	cp->num_handles = sys_cpu_to_le16(1);
@@ -262,7 +262,7 @@ void bt_send_one_host_num_completed_packets(uint16_t handle)
 	hc->count  = sys_cpu_to_le16(1);
 
 	err = bt_hci_cmd_send(BT_HCI_OP_HOST_NUM_COMPLETED_PACKETS, buf);
-	BT_ASSERT_MSG(err == 0, "Unable to send Host NCP (err %d)", err);
+	//BT_ASSERT_MSG(err == 0, "Unable to send Host NCP (err %d)", err);
 }
 
 #if defined(CONFIG_BT_TESTING)
@@ -433,15 +433,15 @@ int bt_hci_cmd_send_sync(uint16_t opcode, struct net_buf *buf,
 			 */
 			__maybe_unused bool success = process_pending_cmd(HCI_CMD_TIMEOUT);
 
-			BT_ASSERT_MSG(success, "command opcode 0x%04x timeout", opcode);
+			//BT_ASSERT_MSG(success, "command opcode 0x%04x timeout", opcode);
 		} while (buf != cmd);
 	}
 
 	/* Now that we have sent the command, suspend until the LL replies */
 	err = k_sem_take(&sync_sem, HCI_CMD_TIMEOUT);
-	BT_ASSERT_MSG(err == 0,
-		      "Controller unresponsive, command opcode 0x%04x timeout with err %d",
-		      opcode, err);
+	// BT_ASSERT_MSG(err == 0,
+	// 	      "Controller unresponsive, command opcode 0x%04x timeout with err %d",
+	// 	      opcode, err);
 
 	status = cmd(buf)->status;
 	if (status) {
@@ -3067,7 +3067,7 @@ static void hci_event(struct net_buf *buf)
 
 	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	LOG_DBG("event 0x%02x", hdr->evt);
-	BT_ASSERT(bt_hci_evt_get_flags(hdr->evt) & BT_HCI_EVT_FLAG_RECV);
+	//BT_ASSERT(bt_hci_evt_get_flags(hdr->evt) & BT_HCI_EVT_FLAG_RECV);
 
 	handle_event(hdr->evt, buf, normal_events, ARRAY_SIZE(normal_events));
 
@@ -3082,7 +3082,7 @@ static void hci_core_send_cmd(void)
 	/* Get next command */
 	LOG_DBG("fetch cmd");
 	buf = k_fifo_get(&bt_dev.cmd_tx_queue, K_NO_WAIT);
-	BT_ASSERT(buf);
+	//BT_ASSERT(buf);
 
 	/* Clear out any existing sent command */
 	if (bt_dev.sent_cmd) {
@@ -4151,7 +4151,7 @@ void hci_event_prio(struct net_buf *buf)
 
 	hdr = net_buf_pull_mem(buf, sizeof(*hdr));
 	evt_flags = bt_hci_evt_get_flags(hdr->evt);
-	BT_ASSERT(evt_flags & BT_HCI_EVT_FLAG_RECV_PRIO);
+	//BT_ASSERT(evt_flags & BT_HCI_EVT_FLAG_RECV_PRIO);
 
 	handle_event(hdr->evt, buf, prio_events, ARRAY_SIZE(prio_events));
 

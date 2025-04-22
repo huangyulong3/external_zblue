@@ -542,7 +542,7 @@ enum {
 	 * without @ref BT_LE_ADV_OPT_ONE_TIME, the host will attempt to
 	 * resume the advertiser under some conditions.
 	 */
-	BT_LE_ADV_OPT_CONNECTABLE __deprecated = BIT(0),
+	BT_LE_ADV_OPT_CONNECTABLE = BIT(0),
 
 	/**
 	 * @internal

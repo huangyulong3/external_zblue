@@ -406,11 +406,10 @@ static int h4_init(const struct device *dev)
 	LOG_INF("Bluetooth H4 driver");
 	return 0;
 }
-
+//.mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP,
 #define H4_DEVICE_INIT(inst)                                                                       \
 	static struct h4_data h4_data_##inst = {                                                   \
 		.fd = -1,                                                                             \
-		.mutex = PTHREAD_RECURSIVE_MUTEX_INITIALIZER_NP,                                   \
 	};                                                                                         \
 	DEVICE_DT_INST_DEFINE(inst, h4_init, NULL, &h4_data_##inst, NULL, POST_KERNEL,             \
 			      CONFIG_KERNEL_INIT_PRIORITY_DEVICE, &h4_drv_api)

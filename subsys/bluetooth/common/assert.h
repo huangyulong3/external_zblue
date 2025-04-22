@@ -3,7 +3,6 @@
  */
 
 #include <zephyr/kernel.h>
-
 #if defined(CONFIG_BT_ASSERT_VERBOSE)
 #define BT_ASSERT_PRINT(test)	      __ASSERT_LOC(test)
 #define BT_ASSERT_PRINT_MSG(fmt, ...) __ASSERT_MSG_INFO(fmt, ##__VA_ARGS__)

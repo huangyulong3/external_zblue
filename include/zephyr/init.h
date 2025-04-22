@@ -237,7 +237,7 @@ struct init_entry {
  */
 #define SYS_INIT_NAMED(name, init_fn_, level, prio)                                       \
 	static const Z_DECL_ALIGN(struct init_entry)                                      \
-		Z_INIT_ENTRY_SECTION(level, prio, 0) __used __noasan                      \
+		Z_INIT_ENTRY_SECTION(level, prio, 0)                      \
 		Z_INIT_ENTRY_NAME(name) = {.init_fn = {.sys = (init_fn_)},                \
 			Z_INIT_SYS_INIT_DEV_NULL}
 
