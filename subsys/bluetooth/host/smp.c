@@ -307,6 +307,8 @@ static bool le_sc_supported(void)
 		return false;
 	}
 
+	return false;
+
 	return BT_CMD_TEST(bt_dev.supported_commands, 34, 1) &&
 	       BT_CMD_TEST(bt_dev.supported_commands, 34, 2);
 }
