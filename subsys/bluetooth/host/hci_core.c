@@ -406,7 +406,7 @@ int bt_hci_cmd_send(struct bt_dev *hdev, uint16_t opcode, struct net_buf *buf)
 		}
 	}
 
-	LOG_DBG("opcode 0x%04x %s len %u", opcode, bt_hci_opcode_to_str(opcode), buf->len);
+	LOG_ERR("opcode 0x%04x %s len %u", opcode, bt_hci_opcode_to_str(opcode), buf->len);
 
 	/* Host Number of Completed Packets can ignore the ncmd value
 	 * and does not generate any cmd complete/status events.
@@ -450,7 +450,7 @@ int bt_hci_cmd_send_sync(struct bt_dev *hdev, uint16_t opcode, struct net_buf *b
 		}
 	}
 
-	LOG_DBG("buf %p opcode 0x%04x %s len %u", buf, opcode, bt_hci_opcode_to_str(opcode), buf->len);
+	LOG_ERR("buf %p opcode 0x%04x %s len %u", buf, opcode, bt_hci_opcode_to_str(opcode), buf->len);
 
 	/* This local sem is just for suspending the current thread until the
 	 * command is processed by the LL. It is given (and we are awaken) by
@@ -2476,6 +2476,8 @@ static void le_ltk_reply(struct bt_dev *hdev, uint16_t handle, uint8_t *ltk)
 	cp->handle = sys_cpu_to_le16(handle);
 	memcpy(cp->ltk, ltk, sizeof(cp->ltk));
 
+	LOG_ERR("----------- le ltk:%s. ------------", bt_hex(cp->ltk, sizeof(cp->ltk)));
+
 	bt_hci_cmd_send(hdev, BT_HCI_OP_LE_LTK_REQ_REPLY, buf);
 }
 
@@ -2540,7 +2542,7 @@ static void hci_cmd_done(struct bt_dev *hdev, uint16_t opcode,
 	}
 
 	/* Take the original command buffer reference. */
-	buf = atomic_ptr_clear((atomic_ptr_t *)&hdev->sent_cmd);
+	buf = (struct net_buf *)atomic_ptr_clear((atomic_ptr_t *)&hdev->sent_cmd);
 
 	if (!buf) {
 		LOG_ERR("No command sent for cmd complete 0x%04x", opcode);

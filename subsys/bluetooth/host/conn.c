@@ -2658,6 +2658,8 @@ int bt_conn_le_start_encryption(struct bt_conn *conn, uint8_t rand[8],
 		(void)memset(cp->ltk + len, 0, sizeof(cp->ltk) - len);
 	}
 
+	LOG_ERR("le ltk:%s.", bt_hex(cp->ltk, sizeof(cp->ltk)));
+
 	return bt_hci_cmd_send_sync(conn->hdev, BT_HCI_OP_LE_START_ENCRYPTION, buf, NULL);
 }
 #endif /* CONFIG_BT_SMP */
@@ -2699,12 +2701,12 @@ uint8_t bt_conn_enc_key_size(const struct bt_conn *conn)
 	if (!conn->encrypt) {
 		return 0;
 	}
-
+#if defined(CONFIG_BT_CLASSIC)
 	if (IS_ENABLED(CONFIG_BT_CLASSIC) &&
 	    conn->type == BT_CONN_TYPE_BR) {
 			return conn->br.link_key ? conn->br.link_key->key_size : 0;
 	}
-
+#endif /* CONFIG_BT_CLASSIC */
 	if (IS_ENABLED(CONFIG_BT_SMP)) {
 		return conn->le.keys ? conn->le.keys->enc_size : 0;
 	}
