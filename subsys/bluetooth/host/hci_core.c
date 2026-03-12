@@ -66,6 +66,14 @@
 #include "direction_internal.h"
 #endif /* CONFIG_BT_DF */
 
+#if defined(CONFIG_BT_CTLR)
+/* Forward declarations for controller HCI functions (avoid including hci_internal.h
+ * which has conflicting hci_init declaration) */
+struct net_buf *hci_cmd_handle(struct net_buf *cmd, void **node_rx);
+int hci_acl_handle(struct net_buf *acl, struct net_buf **evt);
+int hci_iso_handle(struct net_buf *iso, struct net_buf **evt);
+#endif /* CONFIG_BT_CTLR */
+
 #define LOG_LEVEL CONFIG_BT_HCI_CORE_LOG_LEVEL
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bt_hci_core);
@@ -4173,13 +4181,47 @@ static int hci_init(struct bt_dev *hdev)
 	return 0;
 }
 
+/* Forward declaration for bt_recv_unsafe */
+static int bt_recv_unsafe(struct bt_dev *hdev, struct net_buf *buf);
+
 int bt_send(struct bt_dev *hdev, struct net_buf *buf)
 {
 	LOG_DBG("buf %p len %u type %u", buf, buf->len, bt_buf_get_type(buf));
 
 	bt_monitor_send(bt_monitor_opcode(buf), buf->data, buf->len);
 
+#if defined(CONFIG_BT_CTLR)
+	/* Direct call to controller when BT_CTLR is enabled */
+	struct net_buf *evt = NULL;
+	void *node_rx = NULL;
+	int err = 0;
+
+	switch (bt_buf_get_type(buf)) {
+	case BT_BUF_CMD:
+		evt = hci_cmd_handle(buf, &node_rx);
+		break;
+	case BT_BUF_ACL_OUT:
+		err = hci_acl_handle(buf, &evt);
+		break;
+#if defined(CONFIG_BT_ISO)
+	case BT_BUF_ISO_OUT:
+		err = hci_iso_handle(buf, &evt);
+		break;
+#endif /* CONFIG_BT_ISO */
+	default:
+		LOG_ERR("Unknown buf type %u", bt_buf_get_type(buf));
+		net_buf_unref(buf);
+		return -EINVAL;
+	}
+
+	if (evt) {
+		bt_recv_unsafe(hdev, evt);
+	}
+
+	return err;
+#else
 	return bt_hci_send(hdev->hci, buf);
+#endif /* CONFIG_BT_CTLR */
 }
 
 static const struct event_handler prio_events[] = {

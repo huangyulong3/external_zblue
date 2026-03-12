@@ -10,13 +10,18 @@
 #include <zephyr/kernel.h>
 #include <stdio.h>
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <poll.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <errno.h>
 #include <zephyr/types.h>
-#include <zephyr/device.h>
-#include <zephyr/drivers/uart.h>
 #include <zephyr/toolchain.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/sys/byteorder.h>
-#include <zephyr/drivers/uart_pipe.h>
 
 #include <zephyr/logging/log.h>
 #define LOG_MODULE_NAME bttester
@@ -24,7 +29,7 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_BTTESTER_LOG_LEVEL);
 
 #include "btp/btp.h"
 
-#define STACKSIZE 2048
+#define STACKSIZE 8192
 static K_THREAD_STACK_DEFINE(stack, STACKSIZE);
 static struct k_thread cmd_thread;
 
@@ -95,6 +100,13 @@ static void cmd_handler(void *p1, void *p2, void *p3)
 		uint16_t len;
 
 		cmd = k_fifo_get(&cmds_queue, K_FOREVER);
+
+		/* Check for NULL pointer - should not happen with K_FOREVER but be safe */
+		if (cmd == NULL) {
+			LOG_ERR("k_fifo_get returned NULL, retrying...");
+			k_msleep(100);
+			continue;
+		}
 
 		LOG_DBG("cmd service 0x%02x opcode 0x%02x index 0x%02x", cmd->hdr.service,
 			cmd->hdr.opcode, cmd->hdr.index);
@@ -173,54 +185,135 @@ static uint8_t *recv_cb(uint8_t *buf, size_t *off)
 	return new_buf->data;
 }
 
-#if defined(CONFIG_UART_PIPE)
-/* Uart Pipe */
-static void uart_init(uint8_t *data)
-{
-	uart_pipe_register(data, BTP_MTU, recv_cb);
-}
-
-static void uart_send(const uint8_t *data, size_t len)
-{
-	uart_pipe_send(data, len);
-}
-#else /* !CONFIG_UART_PIPE */
 static uint8_t *recv_buf;
 static size_t recv_off;
-static const struct device *const dev =
-	DEVICE_DT_GET(DT_CHOSEN(zephyr_console));
 
-static void timer_expiry_cb(struct k_timer *timer)
+/* TCP socket for BTP communication */
+static int btp_server_fd = -1;  /* Server socket */
+static int btp_client_fd = -1;  /* Connected client socket */
+static pthread_t btp_rx_thread;
+static volatile bool btp_running = false;
+
+/* TCP port for BTP communication */
+#ifndef CONFIG_BT_TESTER_TCP_PORT
+#define CONFIG_BT_TESTER_TCP_PORT 9876
+#endif
+
+static void *btp_rx_thread_func(void *arg)
 {
-	uint8_t c;
+	struct pollfd fds;
 
-	while (uart_poll_in(dev, &c) == 0) {
-		recv_buf[recv_off++] = c;
-		recv_buf = recv_cb(recv_buf, &recv_off);
+	while (btp_running) {
+		/* No client connected yet */
+		if (btp_client_fd < 0) {
+			/* Check for new connection */
+			fds.fd = btp_server_fd;
+			fds.events = POLLIN;
+			if (poll(&fds, 1, 100) > 0 && (fds.revents & POLLIN)) {
+				btp_client_fd = accept(btp_server_fd, NULL, NULL);
+				if (btp_client_fd >= 0) {
+					LOG_INF("BTP client connected (fd=%d)", btp_client_fd);
+				}
+			}
+			continue;
+		}
+
+		fds.fd = btp_client_fd;
+		fds.events = POLLIN;
+
+		/* Wait for data with timeout */
+		int ret = poll(&fds, 1, 100);
+		if (ret > 0 && (fds.revents & POLLIN)) {
+			uint8_t byte;
+			ssize_t n = read(btp_client_fd, &byte, 1);
+			if (n == 1) {
+				recv_buf[recv_off++] = byte;
+				recv_buf = recv_cb(recv_buf, &recv_off);
+			} else if (n == 0) {
+				/* Client disconnected */
+				LOG_INF("BTP client disconnected");
+				close(btp_client_fd);
+				btp_client_fd = -1;
+			} else {
+				if (errno != EAGAIN && errno != EWOULDBLOCK) {
+					LOG_ERR("BTP read error: %d", errno);
+					close(btp_client_fd);
+					btp_client_fd = -1;
+				}
+			}
+		}
 	}
+
+	return NULL;
 }
 
-K_TIMER_DEFINE(timer, timer_expiry_cb, NULL);
-
-/* Uart Poll */
 static void uart_init(uint8_t *data)
 {
-	__ASSERT_NO_MSG(device_is_ready(dev));
+	struct sockaddr_in addr;
+	pthread_attr_t attr;
+	int opt = 1;
 
 	recv_buf = data;
 
-	k_timer_start(&timer, K_MSEC(10), K_MSEC(10));
+	/* Create TCP socket */
+	btp_server_fd = socket(AF_INET, SOCK_STREAM, 0);
+	if (btp_server_fd < 0) {
+		LOG_ERR("Failed to create socket: %d", errno);
+		return;
+	}
+
+	/* Set socket options */
+	setsockopt(btp_server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+	/* Bind to TCP port */
+	memset(&addr, 0, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_addr.s_addr = INADDR_ANY;
+	addr.sin_port = htons(CONFIG_BT_TESTER_TCP_PORT);
+
+	if (bind(btp_server_fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+		LOG_ERR("Failed to bind socket: %d", errno);
+		close(btp_server_fd);
+		btp_server_fd = -1;
+		return;
+	}
+
+	/* Listen for connections */
+	if (listen(btp_server_fd, 1) < 0) {
+		LOG_ERR("Failed to listen: %d", errno);
+		close(btp_server_fd);
+		btp_server_fd = -1;
+		return;
+	}
+
+	LOG_INF("BTP TCP server listening on port %d", CONFIG_BT_TESTER_TCP_PORT);
+
+	/* Start RX thread */
+	btp_running = true;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 4096);
+	pthread_create(&btp_rx_thread, &attr, btp_rx_thread_func, NULL);
+	pthread_attr_destroy(&attr);
 }
 
 static void uart_send(const uint8_t *data, size_t len)
 {
-	int i;
+	if (btp_client_fd < 0) {
+		LOG_WRN("No BTP client connected, dropping %zu bytes", len);
+		return;
+	}
 
-	for (i = 0; i < len; i++) {
-		uart_poll_out(dev, data[i]);
+	ssize_t ret = write(btp_client_fd, data, len);
+	if (ret < 0) {
+		if (errno == EPIPE || errno == ECONNRESET) {
+			LOG_INF("BTP client disconnected during write");
+			close(btp_client_fd);
+			btp_client_fd = -1;
+		} else {
+			LOG_ERR("BTP write error: %d", errno);
+		}
 	}
 }
-#endif /* CONFIG_UART_PIPE */
 
 void tester_init(void)
 {

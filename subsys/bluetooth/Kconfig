@@ -249,6 +249,168 @@ source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/Kconfig.iso"
 source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/common/Kconfig"
 source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/host/Kconfig"
 # source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/controller/Kconfig"
+
+# Simplified BT_CTLR config for NuttX (controller code compiled via Makefile)
+config BT_CTLR
+	bool "Bluetooth Controller"
+	help
+	  Enables support for SoC native controller implementations.
+	  Controller source files are added via Makefile.default.
+
+config BT_CTLR_VIRTUAL_RADIO
+	bool "Virtual Radio (Socket-based simulation)"
+	default y if BT_CTLR
+	help
+	  Enable socket-based virtual radio for BLE controller simulation
+	  in QEMU. This replaces hardware radio with UDP socket communication
+	  for transmitting and receiving BLE PDUs. The radio ISR, RTC timer,
+	  and software interrupts are simulated using NuttX work queues and
+	  POSIX timers.
+
+config BT_CTLR_HCI
+	bool "HCI interface for controller"
+	default y if BT_CTLR
+	help
+	  Enable HCI interface for the Bluetooth controller.
+	  This compiles hci.c and hci_driver.c.
+
+config BT_CTLR_ADV_EXT_SUPPORT
+	bool
+	default y if BT_CTLR
+	help
+	  Selected by the controller to indicate support for Extended Advertising.
+
+config BT_CTLR_SCAN_REQ_NOTIFY_SUPPORT
+	bool
+	default y if BT_CTLR
+
+config BT_CTLR_DATA_LEN_UPDATE_SUPPORT
+	bool
+	default y if BT_CTLR
+
+config BT_CTLR_PHY_UPDATE_SUPPORT
+	bool
+	default y if BT_CTLR
+
+config BT_CTLR_CHAN_SEL_2_SUPPORT
+	bool
+	default y if BT_CTLR
+
+config BT_CTLR_COMPANY_ID
+	hex "Company ID"
+	default 0x038F
+	help
+	  Set the Bluetooth Company Identifier that will be used in
+	  the VERSION_IND PDU. Uses Nordic Semiconductor ASA by default.
+
+config BT_CTLR_SUBVERSION_NUMBER
+	hex "Subversion Number"
+	default 0xFFFF
+	help
+	  Set the Subversion Number that will be used in VERSION_IND PDU.
+
+config BT_CTLR_RX_BUFFERS
+	int "Number of Rx buffers"
+	default 6
+	help
+	  Set the number of Rx PDU buffers.
+
+config BT_CTLR_LLCP_CONN
+	int "Number of LLCP connections"
+	default BT_MAX_CONN
+	help
+	  Set the number of LLCP connections.
+
+config BT_CTLR_LLCP_TX_PER_CONN_TX_CTRL_BUF_NUM_MAX
+	int "Max TX control buffers per connection"
+	default 1
+	help
+	  Set the max number of TX control buffers per connection.
+
+config BT_CTLR_LLCP_COMMON_TX_CTRL_BUF_NUM
+	int "Common TX control buffers"
+	default 4
+	help
+	  Set the number of common TX control buffers.
+
+config BT_CTLR_LLCP_PER_CONN_TX_CTRL_BUF_NUM
+	int "Per connection TX control buffers"
+	default 1
+	help
+	  Set the number of per connection TX control buffers.
+
+config BT_CTLR_LLCP_LOCAL_PROC_CTX_BUF_NUM
+	int "Number of local control procedure contexts"
+	default 6 if BT_CTLR_LLCP_CONN < 4
+	default 2 if BT_CTLR_LLCP_CONN = 1
+	default BT_CTLR_LLCP_CONN
+	help
+	  Set the number of local control procedure contexts available.
+	  This defines the size of the pool of control procedure contexts
+	  for handling local initiated control procedures.
+
+config BT_CTLR_LLCP_REMOTE_PROC_CTX_BUF_NUM
+	int "Number of remote control procedure contexts"
+	default BT_CTLR_LLCP_CONN
+	help
+	  Set the number of remote control procedure contexts available.
+	  This defines the size of the pool of control procedure contexts
+	  for handling remote initiated control procedures.
+
+config BT_CTLR_LLL_PRIO
+	int "Lower Link Layer (Radio) IRQ priority"
+	default 0
+	help
+	  The interrupt priority for event preparation and radio IRQ.
+
+config BT_CTLR_ULL_HIGH_PRIO
+	int "Upper Link Layer High IRQ priority"
+	default 1
+	help
+	  The interrupt priority for Ticker's Worker IRQ and Upper Link Layer
+	  higher priority functions.
+
+config BT_CTLR_ULL_LOW_PRIO
+	int "Upper Link Layer Low IRQ priority"
+	default 1
+	help
+	  The interrupt priority for Ticker's Job IRQ and Upper Link Layer
+	  lower priority functions.
+
+config BT_CTLR_EVENT_IFS_LOW_LAT_US
+	int "Low latency tIFS value in microseconds"
+	default 150
+	help
+	  Set low latency tIFS value.
+
+config BT_CTLR_FILTER_ACCEPT_LIST
+	bool "Filter Accept List Support"
+	default y
+	help
+	  Enable support for controller Filter Accept List feature
+
+config BT_CTLR_FAL_SIZE
+	int "Filter Accept List size"
+	depends on BT_CTLR_FILTER_ACCEPT_LIST
+	default 8
+	help
+	  Set the size of the Filter Accept List.
+
+config BT_CTLR_BREDR
+	bool "BR/EDR Controller Support"
+	depends on BT_CTLR
+	help
+	  Enable support for BR/EDR Controller in the Bluetooth stack.
+	  This implements the BR/EDR Controller as defined in
+	  Bluetooth Core Specification Vol 2.
+
+config BT_CTLR_BREDR_TX_BUFFERS
+	int "BR/EDR TX buffers"
+	default 4
+	depends on BT_CTLR_BREDR
+	help
+	  Number of TX buffers for BR/EDR controller.
+
 source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/crypto/Kconfig"
 source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/lib/Kconfig"
 # source "$APPSDIR/external/zblue/zblue/subsys/bluetooth/Kconfig.logging"
@@ -265,12 +427,12 @@ endif # BT_HCI
 
 config BT_COMPANY_ID
 	hex "Company Id"
-	default 0x05F1
+	default 0x038F
 	range 0x0000 0xFFFF
 	help
-	  Set the Bluetooth Company Identifier for this device. The Linux
-	  Foundation's Company Identifier (0x05F1) is the default value for
-	  this option although silicon vendors and hardware manufacturers
+	  Set the Bluetooth Company Identifier for this device. The Xiaoni
+	  Company Identifier (0x05F1) is the default value for
+	  this option although Xiaomi vendors and hardware manufacturers
 	  can set their own. Note that the controller's Company Identifier is
 	  controlled by BT_CTLR_COMPANY_ID. The full list of Bluetooth
 	  Company Identifiers can be found here:

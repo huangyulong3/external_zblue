@@ -18,6 +18,7 @@
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_BTTESTER_LOG_LEVEL);
 
 #include "btp/btp.h"
+#include "z_api_port.h"
 
 #define DATA_MTU_INITIAL 128
 #define DATA_MTU 256
@@ -84,7 +85,7 @@ static void connected_cb(struct bt_l2cap_chan *l2cap_chan)
 
 	ev.chan_id = chan->chan_id;
 	/* TODO: ev.psm */
-	if (!bt_conn_get_info(l2cap_chan->conn, &info)) {
+	if (!z_api(bt_conn_get_info)(l2cap_chan->conn, &info)) {
 		switch (info.type) {
 		case BT_CONN_TYPE_LE:
 			ev.mtu_remote = sys_cpu_to_le16(chan->le.tx.mtu);
@@ -122,7 +123,7 @@ static void disconnected_cb(struct bt_l2cap_chan *l2cap_chan)
 	/* TODO: ev.result */
 	ev.chan_id = chan->chan_id;
 	/* TODO: ev.psm */
-	if (!bt_conn_get_info(l2cap_chan->conn, &info)) {
+	if (!z_api(bt_conn_get_info)(l2cap_chan->conn, &info)) {
 		switch (info.type) {
 		case BT_CONN_TYPE_LE:
 			bt_addr_le_copy(&ev.address, info.le.dst);
@@ -210,7 +211,7 @@ static uint8_t connect(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -229,13 +230,13 @@ static uint8_t connect(const void *cmd, uint16_t cmd_len,
 	}
 
 	if (cp->num == 1 && !ecfc) {
-		err = bt_l2cap_chan_connect(conn, &chan->le.chan, psm);
+		err = z_api(bt_l2cap_chan_connect)(conn, &chan->le.chan, psm);
 		if (err < 0) {
 			goto fail;
 		}
 	} else if (ecfc) {
 #if defined(CONFIG_BT_L2CAP_ECRED)
-		err = bt_l2cap_ecred_chan_connect(conn, allocated_channels,
+		err = z_api(bt_l2cap_ecred_chan_connect)(conn, allocated_channels,
 							psm);
 		if (err < 0) {
 			goto fail;
@@ -275,7 +276,7 @@ static uint8_t disconnect(const void *cmd, uint16_t cmd_len,
 
 	chan = &channels[cp->chan_id];
 
-	err = bt_l2cap_chan_disconnect(&chan->le.chan);
+	err = z_api(bt_l2cap_chan_disconnect)(&chan->le.chan);
 	if (err) {
 		return BTP_STATUS_FAILED;
 	}
@@ -315,19 +316,19 @@ static uint8_t reconfigure(const void *cmd, uint16_t cmd_len,
 		reconf_channels[i] = &channels[cp->chan_id[i]].le.chan;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		LOG_ERR("Unknown connection");
 		return BTP_STATUS_FAILED;
 	}
 
-	err = bt_l2cap_ecred_chan_reconfigure(reconf_channels, mtu);
+	err = z_api(bt_l2cap_ecred_chan_reconfigure)(reconf_channels, mtu);
 	if (err) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 #endif
@@ -340,21 +341,21 @@ static uint8_t disconnect_eatt_chans(const void *cmd, uint16_t cmd_len,
 	struct bt_conn *conn;
 	int err;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		LOG_ERR("Unknown connection");
 		return BTP_STATUS_FAILED;
 	}
 
 	for (int i = 0; i < cp->count; i++) {
-		err = bt_eatt_disconnect_one(conn);
+		err = z_api(bt_eatt_disconnect_one)(conn);
 		if (err) {
-			bt_conn_unref(conn);
+			z_api(bt_conn_unref)(conn);
 			return BTP_STATUS_FAILED;
 		}
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 #endif
@@ -396,7 +397,7 @@ static uint8_t send_data(const void *cmd, uint16_t cmd_len,
 	net_buf_reserve(buf, BT_L2CAP_SDU_CHAN_SEND_RESERVE);
 
 	net_buf_add_mem(buf, cp->data, data_len);
-	ret = bt_l2cap_chan_send(&chan->le.chan, buf);
+	ret = z_api(bt_l2cap_chan_send)(&chan->le.chan, buf);
 	if (ret < 0) {
 		LOG_ERR("Unable to send data: %d", -ret);
 		net_buf_unref(buf);
@@ -439,7 +440,7 @@ static int accept(struct bt_conn *conn, struct bt_l2cap_server *server,
 {
 	struct channel *chan;
 
-	if (bt_conn_enc_key_size(conn) < req_keysize) {
+	if (z_api(bt_conn_enc_key_size)(conn) < req_keysize) {
 		return -EPERM;
 	}
 
@@ -501,7 +502,7 @@ static uint8_t listen(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	if (bt_l2cap_server_register(server) < 0) {
+	if (z_api(bt_l2cap_server_register)(server) < 0) {
 		server->psm = 0U;
 		return BTP_STATUS_FAILED;
 	}
@@ -526,7 +527,7 @@ static uint8_t credits(const void *cmd, uint16_t cmd_len,
 	}
 
 	if (chan->pending_credit) {
-		if (bt_l2cap_chan_recv_complete(&chan->le.chan,
+		if (z_api(bt_l2cap_chan_recv_complete)(&chan->le.chan,
 						chan->pending_credit) < 0) {
 			return BTP_STATUS_FAILED;
 		}
@@ -589,21 +590,25 @@ static const struct btp_handler handlers[] = {
 		.expect_len = sizeof(struct btp_l2cap_listen_cmd),
 		.func = listen,
 	},
+#if defined(CONFIG_BT_L2CAP_ECRED)
 	{
 		.opcode = BTP_L2CAP_RECONFIGURE,
 		.expect_len = BTP_HANDLER_LENGTH_VARIABLE,
 		.func = reconfigure,
 	},
+#endif
 	{
 		.opcode = BTP_L2CAP_CREDITS,
 		.expect_len = sizeof(struct btp_l2cap_credits_cmd),
 		.func = credits,
 	},
+#if defined(CONFIG_BT_EATT)
 	{
 		.opcode = BTP_L2CAP_DISCONNECT_EATT_CHANS,
 		.expect_len = sizeof(struct btp_l2cap_disconnect_eatt_chans_cmd),
 		.func = disconnect_eatt_chans,
 	},
+#endif
 };
 
 uint8_t tester_init_l2cap(void)

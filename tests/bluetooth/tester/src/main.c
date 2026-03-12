@@ -19,5 +19,11 @@ LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_BTTESTER_LOG_LEVEL);
 int main(void)
 {
 	tester_init();
+
+	/* Keep the main thread alive - in NuttX, returning from main exits the process */
+	while (1) {
+		k_sleep(K_FOREVER);
+	}
+
 	return 0;
 }

@@ -22,6 +22,7 @@
 #include <zephyr/tracing/tracing_macros.h>
 #include <zephyr/sys/mem_stats.h>
 #include <zephyr/sys/iterable_sections.h>
+#include <nuttx/wdog.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -1512,6 +1513,9 @@ struct k_timer {
 	 */
 	struct _timeout timeout;
 
+	/* NuttX watchdog timer for actual timing */
+	struct wdog_s wdog;
+
 	/* wait queue for the (single) thread waiting on this timer */
 	_wait_q_t wait_q;
 
@@ -1537,14 +1541,23 @@ struct k_timer {
 #endif
 };
 
-#define Z_TIMER_INITIALIZER(obj, expiry, stop) \
+/* #define Z_TIMER_INITIALIZER(obj, expiry, stop) \
 	{ \
 	.timeout = { \
 		.node = {},\
-		.fn = z_timer_expiration_handler, \
+		.fn = NULL, \
 		.dticks = 0, \
 	}, \
+	.wdog = {}, \
 	.wait_q = Z_WAIT_Q_INIT(&obj.wait_q), \
+	.expiry_fn = expiry, \
+	.stop_fn = stop, \
+	.status = 0, \
+	.user_data = 0, \
+	} */
+
+#define Z_TIMER_INITIALIZER(obj, expiry, stop) \
+	{ \
 	.expiry_fn = expiry, \
 	.stop_fn = stop, \
 	.status = 0, \
@@ -1601,8 +1614,7 @@ typedef void (*k_timer_stop_t)(struct k_timer *timer);
  * @param stop_fn   Function to invoke if the timer is stopped while running.
  */
 #define K_TIMER_DEFINE(name, expiry_fn, stop_fn) \
-	STRUCT_SECTION_ITERABLE(k_timer, name) = \
-		Z_TIMER_INITIALIZER(name, expiry_fn, stop_fn)
+	struct k_timer name = Z_TIMER_INITIALIZER(name, expiry_fn, stop_fn)
 
 /**
  * @brief Initialize a timer.
@@ -6057,7 +6069,7 @@ static inline void k_cpu_atomic_idle(unsigned int key)
 /**
  * @internal
  */
-void z_timer_expiration_handler(struct _timeout *timeout);
+/* void z_timer_expiration_handler(struct _timeout *timeout); */
 /**
  * INTERNAL_HIDDEN @endcond
  */

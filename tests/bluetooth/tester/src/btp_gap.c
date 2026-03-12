@@ -29,6 +29,7 @@
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_BTTESTER_LOG_LEVEL);
 
 #include "btp/btp.h"
+#include "z_api_port.h"
 
 #define CONTROLLER_NAME "btp_tester"
 
@@ -172,7 +173,7 @@ static void le_param_updated(struct bt_conn *conn, uint16_t interval,
 	tester_event(BTP_SERVICE_ID_GAP, BTP_GAP_EV_CONN_PARAM_UPDATE, &ev, sizeof(ev));
 }
 
-static bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
+static bool btp_le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
 {
 	/* reject update if all parameters match reject pattern */
 	if ((param->interval_min == REJECT_INTERVAL_MIN) &&
@@ -230,7 +231,7 @@ static struct bt_conn_cb conn_callbacks = {
 	.disconnected = le_disconnected,
 	.identity_resolved = le_identity_resolved,
 	.le_param_updated = le_param_updated,
-	.le_param_req = le_param_req,
+	.le_param_req = btp_le_param_req,
 	.security_changed = le_security_changed,
 };
 
@@ -1091,7 +1092,8 @@ static void auth_cancel(struct bt_conn *conn)
 	/* TODO */
 }
 
-enum bt_security_err auth_pairing_accept(struct bt_conn *conn,
+#if defined(CONFIG_BT_SMP_APP_PAIRING_ACCEPT)
+static enum bt_security_err auth_pairing_accept(struct bt_conn *conn,
 					 const struct bt_conn_pairing_feat *const feat)
 {
 	struct btp_gap_bond_lost_ev ev;
@@ -1112,6 +1114,7 @@ enum bt_security_err auth_pairing_accept(struct bt_conn *conn,
 
 	return BT_SECURITY_ERR_SUCCESS;
 }
+#endif /* CONFIG_BT_SMP_APP_PAIRING_ACCEPT */
 
 void auth_pairing_failed(struct bt_conn *conn, enum bt_security_err reason)
 {
@@ -1178,7 +1181,9 @@ static uint8_t set_io_cap(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
+#if defined(CONFIG_BT_SMP_APP_PAIRING_ACCEPT)
 	cb.pairing_accept = auth_pairing_accept;
+#endif
 
 	if (bt_conn_auth_cb_register(&cb)) {
 		return BTP_STATUS_FAILED;
@@ -1900,7 +1905,9 @@ uint8_t tester_init_gap(void)
 
 	(void)memset(&cb, 0, sizeof(cb));
 	bt_conn_auth_cb_register(NULL);
+#if defined(CONFIG_BT_SMP_APP_PAIRING_ACCEPT)
 	cb.pairing_accept = auth_pairing_accept;
+#endif
 	if (bt_conn_auth_cb_register(&cb)) {
 		return BTP_STATUS_FAILED;
 	}

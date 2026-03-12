@@ -230,3 +230,22 @@ config BT_SAMPLE_HFP_HF
 
 endif
 
+menuconfig BT_TESTER
+  bool "Bluetooth Tester (AutoPTS)"
+  default n
+  depends on BT_HCI
+  help
+    Enable Bluetooth Tester for AutoPTS testing framework.
+    This builds the bttester application that communicates
+    with AutoPTS via BTP protocol.
+
+if BT_TESTER
+
+config BTTESTER_LOG_LEVEL
+  int "BT Tester Log Level"
+  default 3
+  help
+    Sets log level for the BT tester.
+
+endif # BT_TESTER
+

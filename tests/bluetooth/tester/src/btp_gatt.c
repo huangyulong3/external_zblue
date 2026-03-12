@@ -28,6 +28,16 @@
 LOG_MODULE_REGISTER(LOG_MODULE_NAME, CONFIG_BTTESTER_LOG_LEVEL);
 
 #include "btp/btp.h"
+#include "z_api_port.h"
+
+/* Macro to set chan_opt if EATT is enabled */
+#if defined(CONFIG_BT_EATT)
+#define SET_CHAN_OPT(params) (params).chan_opt = BT_ATT_CHAN_OPT_NONE
+#define SET_CHAN_OPT_PTR(params) (params)->chan_opt = BT_ATT_CHAN_OPT_NONE
+#else
+#define SET_CHAN_OPT(params) do { } while (0)
+#define SET_CHAN_OPT_PTR(params) do { } while (0)
+#endif
 
 #define MAX_BUFFER_SIZE 2048
 #define MAX_UUID_LEN 16
@@ -276,7 +286,7 @@ static int register_service(void)
 				       (attr_count - svc_attr_count);
 	server_svcs[svc_count].attr_count = svc_attr_count;
 
-	err = bt_gatt_service_register(&server_svcs[svc_count]);
+	err = z_api(bt_gatt_service_register)(&server_svcs[svc_count]);
 	if (!err) {
 		/* Service registered, reset the counter */
 		svc_attr_count = 0U;
@@ -362,11 +372,11 @@ static ssize_t read_value(struct bt_conn *conn, const struct bt_gatt_attr *attr,
 	}
 
 	if ((attr->perm & GATT_PERM_ENC_READ_MASK) && (conn != NULL) &&
-	    (value->enc_key_size > bt_conn_enc_key_size(conn))) {
+	    (value->enc_key_size > z_api(bt_conn_enc_key_size)(conn))) {
 		return BT_GATT_ERR(BT_ATT_ERR_ENCRYPTION_KEY_SIZE);
 	}
 
-	return bt_gatt_attr_read(conn, attr, buf, len, offset, value->data,
+	return z_api(bt_gatt_attr_read)(conn, attr, buf, len, offset, value->data,
 				 value->len);
 }
 
@@ -394,7 +404,7 @@ static ssize_t write_value(struct bt_conn *conn,
 	}
 
 	if ((attr->perm & GATT_PERM_ENC_WRITE_MASK) &&
-	    (value->enc_key_size > bt_conn_enc_key_size(conn))) {
+	    (value->enc_key_size > z_api(bt_conn_enc_key_size)(conn))) {
 		return BT_GATT_ERR(BT_ATT_ERR_ENCRYPTION_KEY_SIZE);
 	}
 
@@ -862,16 +872,16 @@ static uint8_t alloc_value(struct bt_gatt_attr *attr, struct set_value *data)
 
 	if (tester_test_bit(value->flags, GATT_VALUE_CCC_FLAG) && ccc_value) {
 		if (ccc_value == BT_GATT_CCC_NOTIFY) {
-			bt_gatt_notify(NULL, attr, value->data, value->len);
+			z_api(bt_gatt_notify)(NULL, attr, value->data, value->len);
 		} else {
 			indicate_params.attr = attr;
 			indicate_params.data = value->data;
 			indicate_params.len = value->len;
 			indicate_params.func = indicate_cb;
 			indicate_params.destroy = NULL;
-			indicate_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+			SET_CHAN_OPT(indicate_params);
 
-			bt_gatt_indicate(NULL, &indicate_params);
+			z_api(bt_gatt_indicate)(NULL, &indicate_params);
 		}
 	}
 
@@ -1001,19 +1011,19 @@ static uint8_t exchange_mtu(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_exchange_mtu_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	exchange_params.func = exchange_func;
 
-	if (bt_gatt_exchange_mtu(conn, &exchange_params) < 0) {
-		bt_conn_unref(conn);
+	if (z_api(bt_gatt_exchange_mtu)(conn, &exchange_params) < 0) {
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	/* this BTP command is about initiating MTU exchange, no need to wait
 	 * for procedure to complete.
@@ -1082,13 +1092,13 @@ static uint8_t disc_all_prim(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_disc_all_prim_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_disc_prim_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1097,17 +1107,17 @@ static uint8_t disc_all_prim(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
 	discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 	discover_params.func = disc_prim_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
 	btp_opcode = BTP_GATT_DISC_ALL_PRIM;
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1123,18 +1133,18 @@ static uint8_t disc_prim_uuid(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (btp2bt_uuid(cp->uuid, cp->uuid_length, &uuid.uuid)) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_disc_prim_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1143,17 +1153,17 @@ static uint8_t disc_prim_uuid(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = BT_ATT_LAST_ATTRIBUTE_HANDLE;
 	discover_params.type = BT_GATT_DISCOVER_PRIMARY;
 	discover_params.func = disc_prim_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
 	btp_opcode = BTP_GATT_DISC_PRIM_UUID;
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1210,13 +1220,13 @@ static uint8_t find_included(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_find_included_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_find_included_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1224,15 +1234,15 @@ static uint8_t find_included(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = sys_le16_to_cpu(cp->end_handle);
 	discover_params.type = BT_GATT_DISCOVER_INCLUDE;
 	discover_params.func = find_included_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1288,13 +1298,13 @@ static uint8_t disc_all_chrc(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_disc_all_chrc_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_disc_chrc_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1302,18 +1312,18 @@ static uint8_t disc_all_chrc(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = sys_le16_to_cpu(cp->end_handle);
 	discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 	discover_params.func = disc_chrc_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_DISC_ALL_CHRC;
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1329,18 +1339,18 @@ static uint8_t disc_chrc_uuid(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (btp2bt_uuid(cp->uuid, cp->uuid_length, &uuid.uuid)) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_disc_chrc_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1349,18 +1359,18 @@ static uint8_t disc_chrc_uuid(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = sys_le16_to_cpu(cp->end_handle);
 	discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 	discover_params.func = disc_chrc_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_DISC_CHRC_UUID;
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1412,13 +1422,13 @@ static uint8_t disc_all_desc(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_disc_all_desc_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_disc_all_desc_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1426,15 +1436,15 @@ static uint8_t disc_all_desc(const void *cmd, uint16_t cmd_len,
 	discover_params.end_handle = sys_le16_to_cpu(cp->end_handle);
 	discover_params.type = BT_GATT_DISCOVER_DESCRIPTOR;
 	discover_params.func = disc_all_desc_cb;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
-	if (bt_gatt_discover(conn, &discover_params) < 0) {
+	if (z_api(bt_gatt_discover)(conn, &discover_params) < 0) {
 		discover_destroy(&discover_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1526,13 +1536,13 @@ static uint8_t read_data(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_read_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_read_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1540,18 +1550,18 @@ static uint8_t read_data(const void *cmd, uint16_t cmd_len,
 	read_params.single.handle = sys_le16_to_cpu(cp->handle);
 	read_params.single.offset = 0x0000;
 	read_params.func = read_cb;
-	read_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(read_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_READ;
 
-	if (bt_gatt_read(conn, &read_params) < 0) {
+	if (z_api(bt_gatt_read)(conn, &read_params) < 0) {
 		read_destroy(&read_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1567,18 +1577,18 @@ static uint8_t read_uuid(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (btp2bt_uuid(cp->uuid, cp->uuid_length, &uuid.uuid)) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_read_uuid_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1587,17 +1597,17 @@ static uint8_t read_uuid(const void *cmd, uint16_t cmd_len,
 	read_params.by_uuid.start_handle = sys_le16_to_cpu(cp->start_handle);
 	read_params.by_uuid.end_handle = sys_le16_to_cpu(cp->end_handle);
 	read_params.func = read_uuid_cb;
-	read_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(read_params);
 
 	btp_opcode = BTP_GATT_READ_UUID;
 
-	if (bt_gatt_read(conn, &read_params) < 0) {
+	if (z_api(bt_gatt_read)(conn, &read_params) < 0) {
 		read_destroy(&read_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1608,13 +1618,13 @@ static uint8_t read_long(const void *cmd, uint16_t cmd_len,
 	const struct btp_gatt_read_long_cmd *cp = cmd;
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_read_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1622,18 +1632,18 @@ static uint8_t read_long(const void *cmd, uint16_t cmd_len,
 	read_params.single.handle = sys_le16_to_cpu(cp->handle);
 	read_params.single.offset = sys_le16_to_cpu(cp->offset);
 	read_params.func = read_cb;
-	read_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(read_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_READ_LONG;
 
-	if (bt_gatt_read(conn, &read_params) < 0) {
+	if (z_api(bt_gatt_read)(conn, &read_params) < 0) {
 		read_destroy(&read_params);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1659,13 +1669,13 @@ static uint8_t read_multiple(const void *cmd, uint16_t cmd_len,
 		handles[i] = sys_le16_to_cpu(cp->handles[i]);
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_read_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1673,18 +1683,18 @@ static uint8_t read_multiple(const void *cmd, uint16_t cmd_len,
 	read_params.handle_count = cp->handles_count;
 	read_params.multiple.handles = handles; /* not used in read func */
 	read_params.multiple.variable = false;
-	read_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(read_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_READ_MULTIPLE;
 
-	if (bt_gatt_read(conn, &read_params) < 0) {
+	if (z_api(bt_gatt_read)(conn, &read_params) < 0) {
 		gatt_buf_clear();
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1710,13 +1720,13 @@ static uint8_t read_multiple_var(const void *cmd, uint16_t cmd_len,
 		handles[i] = sys_le16_to_cpu(cp->handles[i]);
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
 	if (!gatt_buf_reserve(sizeof(struct btp_gatt_read_rp))) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
@@ -1724,18 +1734,18 @@ static uint8_t read_multiple_var(const void *cmd, uint16_t cmd_len,
 	read_params.handle_count = i;
 	read_params.multiple.handles = handles; /* not used in read func */
 	read_params.multiple.variable = true;
-	read_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(read_params);
 
 	/* TODO should be handled as user_data via CONTAINER_OF macro */
 	btp_opcode = BTP_GATT_READ_MULTIPLE_VAR;
 
-	if (bt_gatt_read(conn, &read_params) < 0) {
+	if (z_api(bt_gatt_read)(conn, &read_params) < 0) {
 		gatt_buf_clear();
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 
 	return BTP_STATUS_DELAY_REPLY;
 }
@@ -1751,20 +1761,20 @@ static uint8_t write_without_rsp(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
-	if (bt_gatt_write_without_response(conn, sys_le16_to_cpu(cp->handle),
+	if (z_api(bt_gatt_write_without_response)(conn, sys_le16_to_cpu(cp->handle),
 					   cp->data,
 					   sys_le16_to_cpu(cp->data_length),
 					   false) < 0) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 
@@ -1779,20 +1789,20 @@ static uint8_t write_signed_without_rsp(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
-	if (bt_gatt_write_without_response(conn, sys_le16_to_cpu(cp->handle),
+	if (z_api(bt_gatt_write_without_response)(conn, sys_le16_to_cpu(cp->handle),
 					   cp->data,
 					   sys_le16_to_cpu(cp->data_length),
 					   true) < 0) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 
@@ -1815,7 +1825,7 @@ static uint8_t write_data(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -1825,14 +1835,14 @@ static uint8_t write_data(const void *cmd, uint16_t cmd_len,
 	write_params.offset = 0U;
 	write_params.data = cp->data;
 	write_params.length = sys_le16_to_cpu(cp->data_length);
-	write_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(write_params);
 
-	if (bt_gatt_write(conn, &write_params) < 0) {
-		bt_conn_unref(conn);
+	if (z_api(bt_gatt_write)(conn, &write_params) < 0) {
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_DELAY_REPLY;
 }
 
@@ -1853,7 +1863,7 @@ static uint8_t write_long(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -1863,14 +1873,14 @@ static uint8_t write_long(const void *cmd, uint16_t cmd_len,
 	write_params.offset = sys_le16_to_cpu(cp->offset);
 	write_params.data = cp->data;
 	write_params.length = sys_le16_to_cpu(cp->data_length);
-	write_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(write_params);
 
-	if (bt_gatt_write(conn, &write_params) < 0) {
-		bt_conn_unref(conn);
+	if (z_api(bt_gatt_write)(conn, &write_params) < 0) {
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_DELAY_REPLY;
 }
 
@@ -1910,7 +1920,7 @@ static uint8_t notify_func(struct bt_conn *conn,
 
 	ev->data_length = sys_cpu_to_le16(length);
 	memcpy(ev->data, data, length);
-	bt_addr_le_copy(&ev->address, bt_conn_get_dst(conn));
+	bt_addr_le_copy(&ev->address, z_api(bt_conn_get_dst)(conn));
 
 	tester_event(BTP_SERVICE_ID_GATT, BTP_GATT_EV_NOTIFICATION,
 		     ev, sizeof(*ev) + length);
@@ -1933,8 +1943,8 @@ static void discover_complete(struct bt_conn *conn,
 		goto fail;
 	}
 
-	subscription->chan_opt = BT_ATT_CHAN_OPT_NONE;
-	if (bt_gatt_subscribe(conn, subscription) < 0) {
+	SET_CHAN_OPT_PTR(subscription);
+	if (z_api(bt_gatt_subscribe)(conn, subscription) < 0) {
 		status = BTP_STATUS_FAILED;
 		goto fail;
 	}
@@ -1998,16 +2008,16 @@ static int enable_subscription(struct bt_conn *conn, uint16_t ccc_handle,
 	discover_params.end_handle = ccc_handle;
 	discover_params.type = BT_GATT_DISCOVER_CHARACTERISTIC;
 	discover_params.func = discover_func;
-	discover_params.chan_opt = BT_ATT_CHAN_OPT_NONE;
+	SET_CHAN_OPT(discover_params);
 
 	subscription->ccc_handle = ccc_handle;
 	subscription->value = value;
 	subscription->notify = notify_func;
 
 	/* require security level from time of subscription */
-	subscription->min_security = bt_conn_get_security(conn);
+	subscription->min_security = z_api(bt_conn_get_security)(conn);
 
-	return bt_gatt_discover(conn, &discover_params);
+	return z_api(bt_gatt_discover)(conn, &discover_params);
 }
 
 static int disable_subscription(struct bt_conn *conn, uint16_t ccc_handle)
@@ -2021,7 +2031,7 @@ static int disable_subscription(struct bt_conn *conn, uint16_t ccc_handle)
 		return -EINVAL;
 	}
 
-	if (bt_gatt_unsubscribe(conn, subscription) < 0) {
+	if (z_api(bt_gatt_unsubscribe)(conn, subscription) < 0) {
 		return -EBUSY;
 	}
 
@@ -2038,7 +2048,7 @@ static uint8_t config_subscription_notif(const void *cmd, uint16_t cmd_len,
 	uint16_t ccc_handle = sys_le16_to_cpu(cp->ccc_handle);
 	uint8_t status;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -2046,7 +2056,7 @@ static uint8_t config_subscription_notif(const void *cmd, uint16_t cmd_len,
 	if (cp->enable) {
 		/* on success response will be sent from callback */
 		if (enable_subscription(conn, ccc_handle, BT_GATT_CCC_NOTIFY) == 0) {
-			bt_conn_unref(conn);
+			z_api(bt_conn_unref)(conn);
 			return BTP_STATUS_DELAY_REPLY;
 		}
 
@@ -2061,7 +2071,7 @@ static uint8_t config_subscription_notif(const void *cmd, uint16_t cmd_len,
 
 	LOG_DBG("Config notification subscription status %u", status);
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return status;
 }
 
@@ -2073,7 +2083,7 @@ static uint8_t config_subscription_ind(const void *cmd, uint16_t cmd_len,
 	uint16_t ccc_handle = sys_le16_to_cpu(cp->ccc_handle);
 	uint8_t status;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -2081,7 +2091,7 @@ static uint8_t config_subscription_ind(const void *cmd, uint16_t cmd_len,
 	if (cp->enable) {
 		/* on success response will be sent from callback */
 		if (enable_subscription(conn, ccc_handle, BT_GATT_CCC_INDICATE) == 0) {
-			bt_conn_unref(conn);
+			z_api(bt_conn_unref)(conn);
 			return BTP_STATUS_DELAY_REPLY;
 		}
 
@@ -2096,7 +2106,7 @@ static uint8_t config_subscription_ind(const void *cmd, uint16_t cmd_len,
 
 	LOG_DBG("Config indication subscription status %u", status);
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return status;
 }
 
@@ -2129,7 +2139,7 @@ static uint8_t notify_mult(const void *cmd, uint16_t cmd_len,
 		return BTP_STATUS_FAILED;
 	}
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
@@ -2149,15 +2159,15 @@ static uint8_t notify_mult(const void *cmd, uint16_t cmd_len,
 		params[i].user_data = NULL;
 	}
 
-	err = bt_gatt_notify_multiple(conn, cp->cnt, params);
+	err = z_api(bt_gatt_notify_multiple)(conn, cp->cnt, params);
 	if (err != 0) {
 		LOG_ERR("bt_gatt_notify_multiple failed: %d", err);
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
 	LOG_DBG("Send %u notifications", cp->cnt);
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 #endif /* CONFIG_BT_GATT_NOTIFY_MULTIPLE */
@@ -2240,7 +2250,7 @@ static uint8_t get_attrs(const void *cmd, uint16_t cmd_len,
 	foreach.buf = buf;
 	foreach.count = 0U;
 
-	bt_gatt_foreach_attr(start_handle, end_handle, get_attrs_rp, &foreach);
+	z_api(bt_gatt_foreach_attr)(start_handle, end_handle, get_attrs_rp, &foreach);
 
 	(void)memcpy(rp->attrs, buf->data, buf->len);
 	rp->attrs_count = foreach.count;
@@ -2316,7 +2326,7 @@ static uint8_t get_attr_val_rp(const struct bt_gatt_attr *attr, uint16_t handle,
 			 * PTS validation and not actual GATT operation.
 			 */
 			if (conn) {
-				if (value->enc_key_size > bt_conn_enc_key_size(conn)) {
+				if (value->enc_key_size > z_api(bt_conn_enc_key_size)(conn)) {
 					rp->att_response = BT_ATT_ERR_ENCRYPTION_KEY_SIZE;
 				}
 			} else {
@@ -2336,13 +2346,13 @@ static uint8_t get_attr_val(const void *cmd, uint16_t cmd_len,
 	uint16_t handle = sys_le16_to_cpu(cp->handle);
 	struct bt_conn *conn;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 
 	net_buf_simple_init(buf, 0);
 
 	struct get_attr_data cb_data = { .buf = buf, .conn = conn };
 
-	bt_gatt_foreach_attr(handle, handle, get_attr_val_rp, &cb_data);
+	z_api(bt_gatt_foreach_attr)(handle, handle, get_attr_val_rp, &cb_data);
 
 	if (buf->len) {
 		(void)memcpy(rsp, buf->data,  buf->len);
@@ -2381,20 +2391,20 @@ static uint8_t change_database(const void *cmd, uint16_t cmd_len,
 			return BTP_STATUS_FAILED;
 		}
 
-		err = bt_gatt_service_register(&test_service);
+		err = z_api(bt_gatt_service_register)(&test_service);
 		break;
 	case BTP_GATT_CHANGE_DB_REMOVE:
 		if (!test_service_registered) {
 			return BTP_STATUS_FAILED;
 		}
 
-		err = bt_gatt_service_unregister(&test_service);
+		err = z_api(bt_gatt_service_unregister)(&test_service);
 		break;
 	case BTP_GATT_CHANGE_DB_ANY:
 		if (test_service_registered) {
-			err = bt_gatt_service_unregister(&test_service);
+			err = z_api(bt_gatt_service_unregister)(&test_service);
 		} else {
-			err = bt_gatt_service_register(&test_service);
+			err = z_api(bt_gatt_service_register)(&test_service);
 		}
 		break;
 	default:
@@ -2417,18 +2427,18 @@ static uint8_t eatt_connect(const void *cmd, uint16_t cmd_len,
 	struct bt_conn *conn;
 	int err;
 
-	conn = bt_conn_lookup_addr_le(BT_ID_DEFAULT, &cp->address);
+	conn = z_api(bt_conn_lookup_addr_le)(BT_ID_DEFAULT, &cp->address);
 	if (!conn) {
 		return BTP_STATUS_FAILED;
 	}
 
-	err = bt_eatt_connect(conn, cp->num_channels);
+	err = z_api(bt_eatt_connect)(conn, cp->num_channels);
 	if (err) {
-		bt_conn_unref(conn);
+		z_api(bt_conn_unref)(conn);
 		return BTP_STATUS_FAILED;
 	}
 
-	bt_conn_unref(conn);
+	z_api(bt_conn_unref)(conn);
 	return BTP_STATUS_SUCCESS;
 }
 
@@ -2584,11 +2594,13 @@ static const struct btp_handler handlers[] = {
 		.expect_len = BTP_HANDLER_LENGTH_VARIABLE,
 		.func = read_multiple_var,
 	},
+#if defined(CONFIG_BT_GATT_NOTIFY_MULTIPLE)
 	{
 		.opcode = BTP_GATT_NOTIFY_MULTIPLE,
 		.expect_len = BTP_HANDLER_LENGTH_VARIABLE,
 		.func = notify_mult,
 	},
+#endif
 };
 
 uint8_t tester_init_gatt(void)
