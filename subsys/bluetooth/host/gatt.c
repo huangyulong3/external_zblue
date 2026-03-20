@@ -2642,6 +2642,15 @@ static int gatt_notify(struct bt_conn *conn, uint16_t handle,
 	}
 #endif /* CONFIG_BT_GATT_NOTIFY_MULTIPLE */
 
+	/* Zero-copy path: use pre-built PDU if provided */
+	if (params->pdu) {
+		buf = params->pdu;
+		LOG_DBG("conn %p handle 0x%04x (zero-copy)", conn, handle);
+		bt_att_set_tx_meta_data(buf, params->func, params->user_data, BT_ATT_CHAN_OPT(params));
+		params->pdu = NULL;
+		return bt_att_send(conn, buf);
+	}
+
 	buf = bt_att_create_pdu(conn, BT_ATT_OP_NOTIFY,
 				sizeof(*nfy) + params->len);
 	if (!buf) {
@@ -2811,6 +2820,13 @@ static int gatt_indicate(struct bt_conn *conn, uint16_t handle,
 		return -ENOMEM;
 	}
 
+	/* Zero-copy path: use pre-built PDU if provided */
+	if (params->pdu) {
+		buf = params->pdu;
+		LOG_DBG("conn %p handle 0x%04x (zero-copy indicate)", conn, handle);
+		bt_att_set_tx_meta_data(buf, NULL, NULL, BT_ATT_CHAN_OPT(params));
+		params->pdu = NULL;
+	} else {
 	buf = bt_att_create_pdu(conn, BT_ATT_OP_INDICATE, len);
 	if (!buf) {
 		LOG_WRN("No buffer available to send indication");
@@ -2825,6 +2841,7 @@ static int gatt_indicate(struct bt_conn *conn, uint16_t handle,
 
 	net_buf_add(buf, params->len);
 	memcpy(ind->value, params->data, params->len);
+	}
 
 	LOG_DBG("conn %p handle 0x%04x", conn, handle);
 
@@ -5302,6 +5319,26 @@ int bt_gatt_write_without_response_cb(struct bt_conn *conn, uint16_t handle,
 
 	return bt_att_send(conn, buf);
 }
+
+int bt_gatt_write_without_response_cb_zerocopy(struct bt_conn *conn,
+						       struct net_buf *pdu,
+						       bt_gatt_complete_func_t func,
+						       void *user_data)
+{
+	__ASSERT(conn, "invalid parameters\n");
+	__ASSERT(pdu, "invalid parameters\n");
+
+	if (conn->state != BT_CONN_CONNECTED) {
+		net_buf_unref(pdu);
+		return -ENOTCONN;
+	}
+
+	LOG_DBG("zero-copy write cmd");
+
+	bt_att_set_tx_meta_data(pdu, func, user_data, BT_ATT_CHAN_OPT_NONE);
+
+	return bt_att_send(conn, pdu);
+}
 #endif /* CONFIG_BT_GATT_CLIENT */
 
 int bt_gatt_send_read_rsp(struct bt_conn *conn, int err, uint16_t handle,
@@ -5599,6 +5636,28 @@ int bt_gatt_write(struct bt_conn *conn, struct bt_gatt_write_params *params)
 	}
 
 	LOG_DBG("handle 0x%04x length %u", params->handle, params->length);
+
+	/* Zero-copy path: use pre-built PDU */
+	if (params->pdu) {
+		struct bt_att_req *req;
+
+		req = gatt_req_alloc(conn->hdev, gatt_write_rsp, params, NULL,
+				     BT_ATT_OP_WRITE_REQ, len);
+		if (!req) {
+			return -ENOMEM;
+		}
+
+		bt_att_set_tx_meta_data(params->pdu, NULL, NULL,
+					   BT_ATT_CHAN_OPT(params));
+		req->buf = params->pdu;
+		params->pdu = NULL;
+
+		int err = bt_att_req_send(conn, req);
+		if (err) {
+			bt_att_req_free(req);
+		}
+		return err;
+	}
 
 	return gatt_req_send(conn, gatt_write_rsp, params, gatt_write_encode,
 			     BT_ATT_OP_WRITE_REQ, len, BT_ATT_CHAN_OPT(params));
@@ -6881,4 +6940,74 @@ void bt_gatt_req_set_mtu(struct bt_att_req *req, uint16_t mtu)
 	 * just drop it here. Feel free to add this capability to other
 	 * request types if needed.
 	 */
+
+}
+/* Zero-copy TX: PDU allocation helpers */
+struct net_buf *bt_gatt_alloc_notify_pdu(struct bt_conn *conn,
+					 uint16_t handle, size_t len)
+{
+	struct net_buf *buf;
+	struct bt_att_notify *nfy;
+
+	buf = bt_att_create_pdu(conn, BT_ATT_OP_NOTIFY,
+				sizeof(*nfy) + len);
+	if (!buf) {
+		return NULL;
+	}
+
+	nfy = net_buf_add(buf, sizeof(*nfy));
+	nfy->handle = sys_cpu_to_le16(handle);
+
+	/* Reserve space for payload - caller writes data here */
+	net_buf_add(buf, len);
+
+	return buf;
+}
+
+struct net_buf *bt_gatt_alloc_indicate_pdu(struct bt_conn *conn,
+					   uint16_t handle, size_t len)
+{
+	struct net_buf *buf;
+	struct bt_att_indicate *ind;
+
+	buf = bt_att_create_pdu(conn, BT_ATT_OP_INDICATE,
+				sizeof(*ind) + len);
+	if (!buf) {
+		return NULL;
+	}
+
+	ind = net_buf_add(buf, sizeof(*ind));
+	ind->handle = sys_cpu_to_le16(handle);
+
+	/* Reserve space for payload - caller writes data here */
+	net_buf_add(buf, len);
+
+	return buf;
+}
+
+struct net_buf *bt_gatt_alloc_write_cmd_pdu(struct bt_conn *conn,
+					    uint16_t handle, size_t len,
+					    bool sign)
+{
+	struct net_buf *buf;
+	struct bt_att_write_cmd *cmd;
+
+	if (sign) {
+		buf = bt_att_create_pdu(conn, BT_ATT_OP_SIGNED_WRITE_CMD,
+					sizeof(*cmd) + len + 12);
+	} else {
+		buf = bt_att_create_pdu(conn, BT_ATT_OP_WRITE_CMD,
+					sizeof(*cmd) + len);
+	}
+	if (!buf) {
+		return NULL;
+	}
+
+	cmd = net_buf_add(buf, sizeof(*cmd));
+	cmd->handle = sys_cpu_to_le16(handle);
+
+	/* Reserve space for payload - caller writes data here */
+	net_buf_add(buf, len);
+
+	return buf;
 }

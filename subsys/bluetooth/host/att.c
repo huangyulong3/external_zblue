@@ -118,6 +118,7 @@ struct bt_att_chan {
 	struct bt_att_req	*req;
 	struct k_fifo		tx_queue;
 	struct k_work_delayable	timeout_work;
+	struct net_buf		*current_buf;
 	sys_snode_t		node;
 };
 
@@ -3083,7 +3084,9 @@ static int bt_att_recv(struct bt_l2cap_chan *chan, struct net_buf *buf)
 		LOG_ERR("Invalid len %u for code 0x%02x", buf->len, hdr->code);
 		err = BT_ATT_ERR_INVALID_PDU;
 	} else {
+		att_chan->current_buf = buf;
 		err = handler->func(att_chan, buf);
+		att_chan->current_buf = NULL;
 	}
 
 	if (handler->type == ATT_REQUEST && err) {
@@ -3134,6 +3137,24 @@ static struct bt_att *att_get(struct bt_conn *conn)
 	}
 
 	return att_chan->att;
+}
+
+struct net_buf *bt_att_get_current_buf(struct bt_conn *conn)
+{
+	struct bt_l2cap_chan *chan;
+	struct bt_att_chan *att_chan;
+
+	if (!conn || conn->state != BT_CONN_CONNECTED) {
+		return NULL;
+	}
+
+	chan = bt_l2cap_le_lookup_rx_cid(conn, BT_L2CAP_CID_ATT);
+	if (!chan) {
+		return NULL;
+	}
+
+	att_chan = ATT_CHAN(chan);
+	return att_chan->current_buf;
 }
 
 struct net_buf *bt_att_create_pdu(struct bt_conn *conn, uint8_t op, size_t len)

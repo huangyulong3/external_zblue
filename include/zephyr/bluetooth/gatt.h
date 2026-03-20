@@ -1363,6 +1363,8 @@ struct bt_gatt_notify_params {
 #if defined(CONFIG_BT_EATT)
 	enum bt_att_chan_opt chan_opt;
 #endif /* CONFIG_BT_EATT */
+	/** Pre-built ATT PDU for zero-copy TX (optional) */
+	struct net_buf *pdu;
 };
 
 /** @brief Notify attribute value change.
@@ -1388,6 +1390,21 @@ struct bt_gatt_notify_params {
  */
 int bt_gatt_notify_cb(struct bt_conn *conn,
 		      struct bt_gatt_notify_params *params);
+
+struct net_buf *bt_gatt_alloc_notify_pdu(struct bt_conn *conn,
+					 uint16_t handle, size_t len);
+
+struct net_buf *bt_gatt_alloc_indicate_pdu(struct bt_conn *conn,
+					   uint16_t handle, size_t len);
+
+struct net_buf *bt_gatt_alloc_write_cmd_pdu(struct bt_conn *conn,
+					    uint16_t handle, size_t len,
+					    bool sign);
+
+int bt_gatt_write_without_response_cb_zerocopy(struct bt_conn *conn,
+					       struct net_buf *pdu,
+					       bt_gatt_complete_func_t func,
+					       void *user_data);
 
 /** @brief Send multiple notifications in a single PDU.
  *
@@ -1564,6 +1581,8 @@ struct bt_gatt_indicate_params {
 #if defined(CONFIG_BT_EATT)
 	enum bt_att_chan_opt chan_opt;
 #endif /* CONFIG_BT_EATT */
+	/** Pre-built ATT PDU for zero-copy TX (optional) */
+	struct net_buf *pdu;
 };
 
 /** @brief Indicate attribute value change.
@@ -2023,6 +2042,8 @@ struct bt_gatt_write_params {
 #if defined(CONFIG_BT_EATT)
 	enum bt_att_chan_opt chan_opt;
 #endif /* CONFIG_BT_EATT */
+	/** Pre-built ATT PDU for zero-copy TX (optional) */
+	struct net_buf *pdu;
 };
 
 /** @brief Write Attribute Value by handle
