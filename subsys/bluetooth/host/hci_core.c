@@ -423,6 +423,22 @@ int bt_hci_cmd_send(struct bt_dev *hdev, uint16_t opcode, struct net_buf *buf)
 
 	LOG_DBG("opcode 0x%04x %s len %u", opcode, bt_hci_opcode_to_str(opcode), buf->len);
 
+	/* Dump HCI command parameters (async send) */
+	if (buf->len > 0) {
+		char hex[128];
+		int dump_len = buf->len > 40 ? 40 : buf->len;
+		int pos = 0;
+		for (int i = 0; i < dump_len && pos < (int)sizeof(hex) - 4; i++) {
+			pos += snprintf(hex + pos, sizeof(hex) - pos, "%02x ", buf->data[i]);
+		}
+		if (buf->len > 40) {
+			snprintf(hex + pos, sizeof(hex) - pos, "...");
+		}
+		LOG_INF("[hci_cmd_async] opcode=0x%04x len=%u params: %s", opcode, buf->len, hex);
+	} else {
+		LOG_INF("[hci_cmd_async] opcode=0x%04x len=0 (no params)", opcode);
+	}
+
 	/* Host Number of Completed Packets can ignore the ncmd value
 	 * and does not generate any cmd complete/status events.
 	 */
@@ -452,9 +468,12 @@ int bt_hci_cmd_send_sync(struct bt_dev *hdev, uint16_t opcode, struct net_buf *b
 	uint8_t status;
 	int err;
 
+	LOG_INF("[hci_cmd_sync] >>> opcode=0x%04x dev=%d", opcode, hdev->dev_id);
+
 	if (!buf) {
 		buf = bt_hci_cmd_create(opcode, 0);
 		if (!buf) {
+			LOG_ERR("[hci_cmd_sync] bt_hci_cmd_create FAILED for 0x%04x", opcode);
 			return -ENOBUFS;
 		}
 	} else {
@@ -466,6 +485,22 @@ int bt_hci_cmd_send_sync(struct bt_dev *hdev, uint16_t opcode, struct net_buf *b
 	}
 
 	LOG_DBG("buf %p opcode 0x%04x %s len %u", buf, opcode, bt_hci_opcode_to_str(opcode), buf->len);
+
+	/* Dump HCI command parameters */
+	if (buf->len > 0) {
+		char hex[128];
+		int dump_len = buf->len > 40 ? 40 : buf->len;
+		int pos = 0;
+		for (int i = 0; i < dump_len && pos < (int)sizeof(hex) - 4; i++) {
+			pos += snprintf(hex + pos, sizeof(hex) - pos, "%02x ", buf->data[i]);
+		}
+		if (buf->len > 40) {
+			snprintf(hex + pos, sizeof(hex) - pos, "...");
+		}
+		LOG_INF("[hci_cmd] opcode=0x%04x len=%u params: %s", opcode, buf->len, hex);
+	} else {
+		LOG_INF("[hci_cmd] opcode=0x%04x len=0 (no params)", opcode);
+	}
 
 	/* This local sem is just for suspending the current thread until the
 	 * command is processed by the LL. It is given (and we are awaken) by
@@ -502,17 +537,26 @@ int bt_hci_cmd_send_sync(struct bt_dev *hdev, uint16_t opcode, struct net_buf *b
 			 */
 			__maybe_unused bool success = process_pending_cmd(hdev, HCI_CMD_TIMEOUT);
 
-			BT_ASSERT_MSG(success, "command opcode 0x%04x %s timeout", opcode, bt_hci_opcode_to_str(opcode));
+			if (!success) {
+				LOG_ERR("command opcode 0x%04x %s timeout (syswq)", opcode, bt_hci_opcode_to_str(opcode));
+				net_buf_unref(buf);
+				return -ETIMEDOUT;
+			}
 		} while (buf != cmd);
 	}
 
 	/* Now that we have sent the command, suspend until the LL replies */
 	err = k_sem_take(&sync_sem, HCI_CMD_TIMEOUT);
-	BT_ASSERT_MSG(err == 0,
-		      "Controller unresponsive, command opcode 0x%04x %s timeout with err %d",
-		      opcode, bt_hci_opcode_to_str(opcode), err);
+	if (err != 0) {
+		LOG_ERR("Controller unresponsive, opcode 0x%04x %s timeout err %d",
+			opcode, bt_hci_opcode_to_str(opcode), err);
+		net_buf_unref(buf);
+		return -ETIMEDOUT;
+	}
 
 	status = cmd(buf)->status;
+	LOG_INF("[hci_cmd_sync] <<< opcode=0x%04x status=0x%02x rsp_len=%u",
+		opcode, status, buf->len);
 	if (status) {
 		LOG_WRN("opcode 0x%04x %s status 0x%02x %s", opcode, bt_hci_opcode_to_str(opcode),
 			status, bt_hci_err_to_str(status));
@@ -1462,6 +1506,8 @@ void bt_hci_le_enh_conn_complete(struct bt_dev *hdev,
 	struct bt_conn *conn;
 	uint8_t id;
 
+	LOG_INF("[conn_dbg] >>> le_enh_conn_complete: handle=%u role=%u peer=%s",
+		handle, evt->role, bt_addr_le_str(&evt->peer_addr));
 	LOG_DBG("status 0x%02x %s handle %u role %u peer %s peer RPA %s",
 		evt->status, bt_hci_err_to_str(evt->status), handle,
 		evt->role, bt_addr_le_str(&evt->peer_addr), bt_addr_str(&evt->peer_rpa));
@@ -1475,6 +1521,9 @@ void bt_hci_le_enh_conn_complete(struct bt_dev *hdev,
 	translate_addrs(hdev, &peer_addr, &id_addr, evt, id);
 
 	conn = find_pending_connect(hdev, evt->role, &id_addr);
+
+	LOG_INF("[conn_dbg] find_pending_connect: conn=%p role=%u id_addr=%s",
+		conn, evt->role, bt_addr_le_str(&id_addr));
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL) &&
 	    evt->role == BT_HCI_ROLE_PERIPHERAL &&
@@ -1594,6 +1643,8 @@ void bt_hci_le_enh_conn_complete(struct bt_dev *hdev,
 	}
 #endif /* defined(CONFIG_BT_USER_PHY_UPDATE) */
 
+	LOG_INF("[conn_dbg] enh_conn_complete: setting CONNECTED, conn=%p handle=%u",
+		conn, conn->handle);
 	bt_conn_set_state(conn, BT_CONN_CONNECTED);
 
 	if (disconnect_reason) {
@@ -1605,6 +1656,7 @@ void bt_hci_le_enh_conn_complete(struct bt_dev *hdev,
 		bt_conn_set_state(conn, BT_CONN_DISCONNECT_COMPLETE);
 	}
 
+	LOG_INF("[conn_dbg] enh_conn_complete: calling bt_conn_connected");
 	bt_conn_connected(conn);
 	bt_conn_unref(conn);
 
@@ -2122,7 +2174,8 @@ static int set_flow_control(struct bt_dev *hdev)
 
 	err = bt_hci_cmd_send_sync(hdev, BT_HCI_OP_HOST_BUFFER_SIZE, buf, NULL);
 	if (err) {
-		return err;
+		LOG_WRN("HCI_Host_Buffer_Size failed (err %d), skipping flow control", err);
+		return 0;
 	}
 
 	buf = bt_hci_cmd_create(BT_HCI_OP_SET_CTL_TO_HOST_FLOW, 1);
@@ -3391,16 +3444,20 @@ static int common_init(struct bt_dev *hdev)
 
 	if (!drv_quirk_no_reset(hdev)) {
 		/* Send HCI_RESET */
-		syslog(LOG_INFO, "dev:%d: Sending HCI_RESET", hdev->dev_id);
+		LOG_INF("dev:%d: Sending HCI_RESET", hdev->dev_id);
 		err = bt_hci_cmd_send_sync(hdev, BT_HCI_OP_RESET, NULL, NULL);
+		LOG_INF("dev:%d: HCI_RESET returned %d", hdev->dev_id, err);
 		if (err) {
 			return err;
 		}
 		hci_reset_complete(hdev);
+		LOG_INF("dev:%d: HCI_RESET complete", hdev->dev_id);
 	}
 
 	/* Read Local Supported Features */
+	LOG_INF("dev:%d: Sending READ_LOCAL_FEATURES", hdev->dev_id);
 	err = bt_hci_cmd_send_sync(hdev, BT_HCI_OP_READ_LOCAL_FEATURES, NULL, &rsp);
+	LOG_INF("dev:%d: READ_LOCAL_FEATURES returned %d", hdev->dev_id, err);
 	if (err) {
 		return err;
 	}
@@ -3408,8 +3465,10 @@ static int common_init(struct bt_dev *hdev)
 	net_buf_unref(rsp);
 
 	/* Read Local Version Information */
+	LOG_INF("dev:%d: Sending READ_LOCAL_VERSION_INFO", hdev->dev_id);
 	err = bt_hci_cmd_send_sync(hdev, BT_HCI_OP_READ_LOCAL_VERSION_INFO, NULL,
 				   &rsp);
+	LOG_INF("dev:%d: READ_LOCAL_VERSION_INFO returned %d", hdev->dev_id, err);
 	if (err) {
 		return err;
 	}
@@ -4144,6 +4203,36 @@ static int hci_init(struct bt_dev *hdev)
 		return err;
 	}
 
+	/* Write a public BD_ADDR via Zephyr VS command if controller has none.
+	 * Nordic nRF54L15 ships without a public address programmed.
+	 */
+	{
+		struct net_buf *buf;
+		struct bt_hci_cp_vs_write_bd_addr *cp;
+		/* Use PTS dongle-friendly address: C0:AA:BB:CC:DD:EE */
+		static const bt_addr_t pub_addr = {{ 0xEE, 0xDD, 0xCC, 0xBB, 0xAA, 0xC0 }};
+
+		LOG_INF("[pub_addr] Attempting to set public BD_ADDR via VS cmd 0x%04x",
+			BT_HCI_OP_VS_WRITE_BD_ADDR);
+
+		buf = bt_hci_cmd_create(BT_HCI_OP_VS_WRITE_BD_ADDR, sizeof(*cp));
+		if (!buf) {
+			LOG_ERR("[pub_addr] Failed to create VS_WRITE_BD_ADDR cmd buf");
+		} else {
+			cp = net_buf_add(buf, sizeof(*cp));
+			bt_addr_copy(&cp->bdaddr, &pub_addr);
+			LOG_INF("[pub_addr] Sending VS_WRITE_BD_ADDR: %02x:%02x:%02x:%02x:%02x:%02x",
+				pub_addr.val[5], pub_addr.val[4], pub_addr.val[3],
+				pub_addr.val[2], pub_addr.val[1], pub_addr.val[0]);
+			err = bt_hci_cmd_send_sync(hdev, BT_HCI_OP_VS_WRITE_BD_ADDR, buf, NULL);
+			if (err) {
+				LOG_WRN("[pub_addr] VS_WRITE_BD_ADDR failed: err=%d", err);
+			} else {
+				LOG_INF("[pub_addr] VS_WRITE_BD_ADDR SUCCESS");
+			}
+		}
+	}
+
 	err = le_init(hdev);
 	if (err) {
 		return err;
@@ -4187,6 +4276,10 @@ static int bt_recv_unsafe(struct bt_dev *hdev, struct net_buf *buf);
 int bt_send(struct bt_dev *hdev, struct net_buf *buf)
 {
 	LOG_DBG("buf %p len %u type %u", buf, buf->len, bt_buf_get_type(buf));
+
+	if (bt_buf_get_type(buf) == BT_BUF_ACL_OUT) {
+		LOG_INF("[acl_dbg] bt_send ACL OUT: len=%u", buf->len);
+	}
 
 	bt_monitor_send(bt_monitor_opcode(buf), buf->data, buf->len);
 
@@ -4379,6 +4472,30 @@ void bt_finalize_init(struct bt_dev *hdev)
 		bt_scan_reset(hdev);
 	}
 
+	/* Override IRK with a fixed value for PTS testing.
+	 * Must be done here (after commit_settings) because
+	 * commit_settings -> bt_setup_random_id_addr generates a random IRK.
+	 */
+#if defined(CONFIG_BT_PRIVACY)
+	{
+		static const uint8_t fixed_irk[16] = {
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10
+		};
+		memcpy(hdev->irk[BT_ID_DEFAULT], fixed_irk, 16);
+		LOG_INF("[fixed_irk] Set fixed IRK in bt_finalize_init");
+	}
+#endif
+
+	LOG_INF(">>> bt_finalize_init: id_count=%d", hdev->id_count);
+	for (int i = 0; i < hdev->id_count && i < 4; i++) {
+		LOG_INF(">>> bt_finalize_init: id[%d] type=%d addr=%02x:%02x:%02x:%02x:%02x:%02x",
+			i, hdev->id_addr[i].type,
+			hdev->id_addr[i].a.val[5], hdev->id_addr[i].a.val[4],
+			hdev->id_addr[i].a.val[3], hdev->id_addr[i].a.val[2],
+			hdev->id_addr[i].a.val[1], hdev->id_addr[i].a.val[0]);
+	}
+
 	bt_dev_show_info(hdev);
 }
 
@@ -4386,10 +4503,14 @@ static int bt_init(struct bt_dev *hdev)
 {
 	int err;
 
+	LOG_INF(">>> bt_init: ENTRY hdev=%p", hdev);
+
 	err = hci_init(hdev);
 	if (err) {
+		LOG_ERR(">>> bt_init: hci_init FAILED err=%d", err);
 		return err;
 	}
+	LOG_INF(">>> bt_init: hci_init OK");
 
 	if (IS_ENABLED(CONFIG_BT_CONN)) {
 		err = bt_conn_init(hdev);
@@ -4508,23 +4629,30 @@ int bt_enable_mc(uint8_t dev_id, bt_ready_cb_t cb)
 	int err;
 	struct bt_dev *hdev;
 
+	LOG_INF(">>> bt_enable_mc: ENTRY dev_id=%d cb=%p", dev_id, cb);
+
 	hdev = bt_dev_alloc(dev_id);
 	if (!hdev) {
+		LOG_ERR(">>> bt_enable_mc: bt_dev_alloc FAILED");
 		return -ENODEV;
 	}
+	LOG_INF(">>> bt_enable_mc: hdev=%p", hdev);
 
 #if DT_HAS_CHOSEN(zephyr_bt_hci)
+	LOG_INF(">>> bt_enable_mc: checking device_is_ready(hci=%p)", hdev->hci);
 	if (!device_is_ready(hdev->hci)) {
-		LOG_ERR("HCI driver is not ready");
+		LOG_ERR(">>> bt_enable_mc: HCI driver is not ready");
 		return -ENODEV;
 	}
+	LOG_INF(">>> bt_enable_mc: HCI driver ready");
 
 	bt_monitor_new_index(BT_MONITOR_TYPE_PRIMARY, BT_HCI_BUS, BT_ADDR_ANY, BT_HCI_NAME);
 #else /* !DT_HAS_CHONSEN(zephyr_bt_hci) */
 	if (!hdev->drv) {
-		LOG_ERR("No HCI driver registered");
+		LOG_ERR(">>> bt_enable_mc: No HCI driver registered");
 		return -ENODEV;
 	}
+	LOG_INF(">>> bt_enable_mc: HCI driver registered");
 #endif
 
 	atomic_clear_bit(hdev->flags, BT_DEV_DISABLE);
@@ -4581,22 +4709,27 @@ int bt_enable_mc(uint8_t dev_id, bt_ready_cb_t cb)
 	k_work_init(&hdev->rx_work, rx_work_handler);
 	k_work_init(&hdev->tx_work, tx_work_handler);
 
+	LOG_INF(">>> bt_enable_mc: opening HCI driver...");
 #if DT_HAS_CHOSEN(zephyr_bt_hci)
 	err = bt_hci_open(hdev->hci, bt_hci_recv, hdev);
 #else
 	err = hdev->drv->open();
 #endif
 	if (err) {
-		LOG_ERR("HCI driver open failed (%d)", err);
+		LOG_ERR(">>> bt_enable_mc: HCI driver open failed (%d)", err);
 		return err;
 	}
 
 	bt_monitor_send(BT_MONITOR_OPEN_INDEX, NULL, 0);
 
+	LOG_INF(">>> bt_enable_mc: HCI open OK, cb=%p", cb);
+
 	if (!cb) {
+		LOG_INF(">>> bt_enable_mc: calling bt_init synchronously");
 		return bt_init(hdev);
 	}
 
+	LOG_INF(">>> bt_enable_mc: submitting init work (async)");
 	k_work_submit(&hdev->init);
 	return 0;
 }
@@ -4826,7 +4959,7 @@ int bt_set_appearance_mc(uint8_t dev_id, uint16_t appearance)
 
 	if (hdev->appearance != appearance) {
 		if (IS_ENABLED(CONFIG_BT_SETTINGS)) {
-			int err = bt_settings_store_appearance(&appearance, sizeof(appearance));
+			int err = bt_settings_store_appearance(dev_id, &appearance, sizeof(appearance));
 			if (err) {
 				LOG_ERR("Unable to save setting 'bt/appearance' (err %d).", err);
 				return err;

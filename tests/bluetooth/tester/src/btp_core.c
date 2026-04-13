@@ -108,7 +108,17 @@ static uint8_t supported_services(const void *cmd, uint16_t cmd_len,
 	tester_set_bit(rp->data, BTP_SERVICE_ID_TMAP);
 #endif /* CONFIG_BT_TMAP */
 
-	*rsp_len = sizeof(*rp) + 2;
+	/* BR/EDR profiles - always supported */
+	tester_set_bit(rp->data, BTP_SERVICE_ID_SDP);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_RFCOMM);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_A2DP);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_HFP);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_AVRCP);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_PAN);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_SPP);
+	tester_set_bit(rp->data, BTP_SERVICE_ID_HID);
+
+	*rsp_len = sizeof(*rp) + 5;
 
 	return BTP_STATUS_SUCCESS;
 }
@@ -119,26 +129,36 @@ static uint8_t register_service(const void *cmd, uint16_t cmd_len,
 	const struct btp_core_register_service_cmd *cp = cmd;
 	uint8_t status;
 
+	LOG_INF(">>> register_service: id=0x%02x", cp->id);
+
 	/* invalid service */
 	if ((cp->id == BTP_SERVICE_ID_CORE) || (cp->id > BTP_SERVICE_ID_MAX)) {
+		LOG_ERR(">>> register_service: invalid service id");
 		return BTP_STATUS_FAILED;
 	}
 
-	/* already registered */
+	/* already registered - unregister first for re-registration */
 	if (atomic_test_bit(registered_services, cp->id)) {
-		return BTP_STATUS_FAILED;
+		LOG_INF(">>> register_service: already registered, unregistering first");
+		atomic_clear_bit(registered_services, cp->id);
 	}
 
 	switch (cp->id) {
 	case BTP_SERVICE_ID_GAP:
+		LOG_INF(">>> register_service: calling tester_init_gap()");
 		status = tester_init_gap();
+		LOG_INF(">>> register_service: tester_init_gap() returned %d", status);
 		break;
 	case BTP_SERVICE_ID_GATT:
+		LOG_INF(">>> register_service: calling tester_init_gatt()");
 		status = tester_init_gatt();
+		LOG_INF(">>> register_service: tester_init_gatt() returned %d", status);
 		break;
 #if defined(CONFIG_BT_L2CAP_DYNAMIC_CHANNEL)
 	case BTP_SERVICE_ID_L2CAP:
+		LOG_INF(">>> register_service: calling tester_init_l2cap()");
 		status = tester_init_l2cap();
+		LOG_INF(">>> register_service: tester_init_l2cap() returned %d", status);
 #endif /* CONFIG_BT_L2CAP_DYNAMIC_CHANNEL */
 		break;
 #if defined(CONFIG_BT_MESH)
@@ -250,6 +270,30 @@ static uint8_t register_service(const void *cmd, uint16_t cmd_len,
 		status = tester_init_ots();
 		break;
 #endif /* CONFIG_BT_OTS */
+	case BTP_SERVICE_ID_SDP:
+		status = tester_init_sdp();
+		break;
+	case BTP_SERVICE_ID_RFCOMM:
+		status = tester_init_rfcomm();
+		break;
+	case BTP_SERVICE_ID_A2DP:
+		status = tester_init_a2dp();
+		break;
+	case BTP_SERVICE_ID_HFP:
+		status = tester_init_hfp();
+		break;
+	case BTP_SERVICE_ID_AVRCP:
+		status = tester_init_avrcp();
+		break;
+	case BTP_SERVICE_ID_PAN:
+		status = tester_init_pan();
+		break;
+	case BTP_SERVICE_ID_SPP:
+		status = tester_init_spp();
+		break;
+	case BTP_SERVICE_ID_HID:
+		status = tester_init_hid();
+		break;
 	default:
 		LOG_WRN("unknown id: 0x%02x", cp->id);
 		status = BTP_STATUS_FAILED;
@@ -397,6 +441,30 @@ static uint8_t unregister_service(const void *cmd, uint16_t cmd_len,
 		status = tester_unregister_ots();
 		break;
 #endif /* CONFIG_BT_OTS */
+	case BTP_SERVICE_ID_SDP:
+		status = tester_unregister_sdp();
+		break;
+	case BTP_SERVICE_ID_RFCOMM:
+		status = tester_unregister_rfcomm();
+		break;
+	case BTP_SERVICE_ID_A2DP:
+		status = tester_unregister_a2dp();
+		break;
+	case BTP_SERVICE_ID_HFP:
+		status = tester_unregister_hfp();
+		break;
+	case BTP_SERVICE_ID_AVRCP:
+		status = tester_unregister_avrcp();
+		break;
+	case BTP_SERVICE_ID_PAN:
+		status = tester_unregister_pan();
+		break;
+	case BTP_SERVICE_ID_SPP:
+		status = tester_unregister_spp();
+		break;
+	case BTP_SERVICE_ID_HID:
+		status = tester_unregister_hid();
+		break;
 	default:
 		LOG_WRN("unknown id: 0x%x", cp->id);
 		status = BTP_STATUS_FAILED;
@@ -407,7 +475,7 @@ static uint8_t unregister_service(const void *cmd, uint16_t cmd_len,
 		atomic_clear_bit(registered_services, cp->id);
 	}
 
-	return BTP_STATUS_FAILED;
+	return status;
 }
 
 static const struct btp_handler handlers[] = {

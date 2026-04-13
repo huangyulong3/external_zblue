@@ -138,3 +138,27 @@ uint8_t tester_unregister_tmap(void);
 
 uint8_t tester_init_ots(void);
 uint8_t tester_unregister_ots(void);
+
+uint8_t tester_init_sdp(void);
+uint8_t tester_unregister_sdp(void);
+
+uint8_t tester_init_rfcomm(void);
+uint8_t tester_unregister_rfcomm(void);
+
+uint8_t tester_init_a2dp(void);
+uint8_t tester_unregister_a2dp(void);
+
+uint8_t tester_init_avrcp(void);
+uint8_t tester_unregister_avrcp(void);
+
+uint8_t tester_init_hfp(void);
+uint8_t tester_unregister_hfp(void);
+
+uint8_t tester_init_pan(void);
+uint8_t tester_unregister_pan(void);
+
+uint8_t tester_init_spp(void);
+uint8_t tester_unregister_spp(void);
+
+uint8_t tester_init_hid(void);
+uint8_t tester_unregister_hid(void);

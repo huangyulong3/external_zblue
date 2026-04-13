@@ -247,5 +247,15 @@ config BTTESTER_LOG_LEVEL
   help
     Sets log level for the BT tester.
 
+config Z_API_USE_FRAMEWORK
+  bool "Use Framework Bluetooth API for z_api"
+  default y if BLUETOOTH_Z_PORT
+  depends on BLUETOOTH_Z_PORT
+  help
+    When enabled, z_api() functions will be implemented using
+    the Framework Bluetooth API (z_port layer).
+    When disabled, z_api() functions will directly call the
+    original Zephyr Bluetooth API (for Zblue environment).
+
 endif # BT_TESTER
 

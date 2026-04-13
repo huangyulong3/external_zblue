@@ -489,7 +489,25 @@ static int l2cap_send_sig(struct bt_conn *conn, struct net_buf *buf)
 	struct bt_l2cap_chan *ch = bt_l2cap_le_lookup_tx_cid(conn, BT_L2CAP_CID_LE_SIG);
 	struct bt_l2cap_le_chan *chan = BT_L2CAP_LE_CHAN(ch);
 
+	LOG_INF("[l2cap_dbg] l2cap_send_sig: conn=%p ch=%p chan=%p buf_len=%u",
+		conn, ch, chan, buf->len);
+
+	if (!ch || !chan) {
+		LOG_ERR("[l2cap_dbg] l2cap_send_sig: no LE SIG channel!");
+		net_buf_unref(buf);
+		return -ENOTCONN;
+	}
+
+	/* Dump first bytes of L2CAP signaling PDU */
+	if (buf->len >= 4) {
+		LOG_INF("[l2cap_dbg] l2cap_send_sig: code=0x%02x id=%d len=%d",
+			buf->data[0], buf->data[1],
+			buf->data[2] | (buf->data[3] << 8));
+	}
+
 	int err = bt_l2cap_send_pdu(chan, buf, NULL, NULL);
+
+	LOG_INF("[l2cap_dbg] l2cap_send_sig: bt_l2cap_send_pdu returned %d", err);
 
 	if (err) {
 		net_buf_unref(buf);
@@ -2778,9 +2796,14 @@ int bt_l2cap_update_conn_param(struct bt_conn *conn,
 	struct bt_l2cap_conn_param_req *req;
 	struct net_buf *buf;
 
+	LOG_INF("[l2cap_dbg] update_conn_param: conn=%p handle=%u min=%d max=%d lat=%d to=%d",
+		conn, conn->handle, param->interval_min, param->interval_max,
+		param->latency, param->timeout);
+
 	buf = l2cap_create_le_sig_pdu(BT_L2CAP_CONN_PARAM_REQ,
 				      get_ident(conn->hdev), sizeof(*req));
 	if (!buf) {
+		LOG_ERR("[l2cap_dbg] update_conn_param: failed to create PDU");
 		return -ENOMEM;
 	}
 

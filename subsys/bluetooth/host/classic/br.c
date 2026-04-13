@@ -935,7 +935,10 @@ int bt_br_init(struct bt_dev *hdev)
 		return err;
 	}
 
-	/* Set Class of device */
+	/* Skip Write Class of Device — not needed when using btproxy with
+	 * a USB dongle (the dongle already has its own CoD configured).
+	 * This command may fail with status 0x11 on some controllers. */
+#if 0
 	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_CLASS_OF_DEVICE, sizeof(*cod));
 	if (!buf) {
 		return -ENOBUFS;
@@ -947,6 +950,7 @@ int bt_br_init(struct bt_dev *hdev)
 	if (err) {
 		return err;
 	}
+#endif
 
 	/* Set page timeout*/
 	buf = bt_hci_cmd_create(BT_HCI_OP_WRITE_PAGE_TIMEOUT, sizeof(uint16_t));

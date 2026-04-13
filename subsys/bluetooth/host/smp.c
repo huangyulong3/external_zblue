@@ -2075,6 +2075,26 @@ static void smp_send(struct bt_smp *smp, struct net_buf *buf,
 {
 	__ASSERT_NO_MSG(user_data == NULL);
 
+	/* Log SMP PDU opcode and data */
+	if (buf->len > 0) {
+		LOG_INF("[smp_dbg] smp_send: opcode=0x%02x len=%u", buf->data[0], buf->len);
+		if (buf->data[0] == 0x08 && buf->len >= 17) {
+			/* Identity Information - dump IRK */
+			LOG_INF("[smp_dbg] IRK in PDU: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+				buf->data[1], buf->data[2], buf->data[3], buf->data[4],
+				buf->data[5], buf->data[6], buf->data[7], buf->data[8],
+				buf->data[9], buf->data[10], buf->data[11], buf->data[12],
+				buf->data[13], buf->data[14], buf->data[15], buf->data[16]);
+		}
+		if (buf->data[0] == 0x09 && buf->len >= 8) {
+			/* Identity Address Information - dump addr */
+			LOG_INF("[smp_dbg] Identity addr in PDU: type=%d %02x:%02x:%02x:%02x:%02x:%02x",
+				buf->data[1],
+				buf->data[7], buf->data[6], buf->data[5],
+				buf->data[4], buf->data[3], buf->data[2]);
+		}
+	}
+
 	int err = bt_l2cap_send_pdu(&smp->chan, buf, cb, NULL);
 
 	if (err) {
@@ -2331,6 +2351,10 @@ static uint8_t bt_smp_distribute_keys(struct bt_smp *smp)
 	struct bt_dev *hdev = conn->hdev;
 	struct bt_keys *keys = conn->le.keys;
 
+	LOG_INF("[smp_dbg] distribute_keys: local_dist=0x%02x remote_dist=0x%02x SC=%d",
+		smp->local_dist, smp->remote_dist,
+		atomic_test_bit(smp->flags, SMP_FLAG_SC));
+
 	if (!keys) {
 		LOG_ERR("No keys space for %s", bt_addr_le_str(&conn->le.dst));
 		return BT_SMP_ERR_UNSPECIFIED;
@@ -2349,6 +2373,8 @@ static uint8_t bt_smp_distribute_keys(struct bt_smp *smp)
 		struct bt_smp_ident_addr_info *id_addr_info;
 		struct net_buf *buf;
 
+		LOG_INF("[smp_dbg] Distributing ID_KEY: IRK + identity addr");
+
 		buf = smp_create_pdu(smp, BT_SMP_CMD_IDENT_INFO,
 				     sizeof(*id_info));
 		if (!buf) {
@@ -2358,6 +2384,12 @@ static uint8_t bt_smp_distribute_keys(struct bt_smp *smp)
 
 		id_info = net_buf_add(buf, sizeof(*id_info));
 		memcpy(id_info->irk, hdev->irk[conn->id], 16);
+
+		LOG_INF("[smp_dbg] IRK[16]: %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+			id_info->irk[0], id_info->irk[1], id_info->irk[2], id_info->irk[3],
+			id_info->irk[4], id_info->irk[5], id_info->irk[6], id_info->irk[7],
+			id_info->irk[8], id_info->irk[9], id_info->irk[10], id_info->irk[11],
+			id_info->irk[12], id_info->irk[13], id_info->irk[14], id_info->irk[15]);
 
 		smp_send(smp, buf, NULL, NULL);
 
@@ -2371,7 +2403,11 @@ static uint8_t bt_smp_distribute_keys(struct bt_smp *smp)
 		id_addr_info = net_buf_add(buf, sizeof(*id_addr_info));
 		bt_addr_le_copy(&id_addr_info->addr, &hdev->id_addr[conn->id]);
 
+		LOG_INF("[smp_dbg] Identity addr: %s", bt_addr_le_str(&id_addr_info->addr));
+
 		smp_send(smp, buf, smp_id_sent, NULL);
+	} else {
+		LOG_INF("[smp_dbg] NOT distributing ID_KEY (local_dist=0x%02x)", smp->local_dist);
 	}
 #endif /* CONFIG_BT_PRIVACY */
 

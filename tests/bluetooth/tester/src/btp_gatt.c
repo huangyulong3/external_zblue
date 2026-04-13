@@ -169,7 +169,7 @@ union uuid {
 static struct bt_gatt_attr *gatt_db_add(const struct bt_gatt_attr *pattern,
 					size_t user_data_len)
 {
-	static struct bt_gatt_attr *attr = server_db;
+	struct bt_gatt_attr *attr = &server_db[attr_count];
 	const union uuid *u = CONTAINER_OF(pattern->uuid, union uuid, uuid);
 	size_t uuid_size = u->uuid.type == BT_UUID_TYPE_16 ? sizeof(u->u16) :
 							     sizeof(u->u128);
@@ -201,7 +201,7 @@ static struct bt_gatt_attr *gatt_db_add(const struct bt_gatt_attr *pattern,
 	attr_count++;
 	svc_attr_count++;
 
-	return attr++;
+	return attr;
 }
 
 /* Convert UUID from BTP command to bt_uuid */
@@ -286,7 +286,13 @@ static int register_service(void)
 				       (attr_count - svc_attr_count);
 	server_svcs[svc_count].attr_count = svc_attr_count;
 
+	LOG_INF("[btp_gatt] register_service: svc[%u] attr_count=%u first_attr_idx=%u",
+		svc_count, svc_attr_count, attr_count - svc_attr_count);
+
 	err = z_api(bt_gatt_service_register)(&server_svcs[svc_count]);
+
+	LOG_INF("[btp_gatt] register_service: z_api(bt_gatt_service_register) returned %d", err);
+
 	if (!err) {
 		/* Service registered, reset the counter */
 		svc_attr_count = 0U;
@@ -926,16 +932,25 @@ static uint8_t start_server(const void *cmd, uint16_t cmd_len,
 {
 	struct btp_gatt_start_server_rp *rp = rsp;
 
+	LOG_INF("[btp_gatt] start_server: svc_count=%u svc_attr_count=%u attr_count=%u",
+		svc_count, svc_attr_count, attr_count);
+
 	/* Register last defined service */
 	if (svc_attr_count) {
 		if (register_service()) {
+			LOG_ERR("[btp_gatt] start_server: register_service FAILED");
 			return BTP_STATUS_FAILED;
 		}
 	}
 
+	LOG_INF("[btp_gatt] start_server: all services registered, svc_count=%u total_attrs=%u",
+		svc_count, attr_count);
+
 	rp->db_attr_off = sys_cpu_to_le16(0); /* TODO*/
 	rp->db_attr_cnt = svc_attr_count;
 	*rsp_len = sizeof(*rp);
+
+	LOG_INF("[btp_gatt] start_server: rsp db_attr_off=0 db_attr_cnt=%u", rp->db_attr_cnt);
 
 	return BTP_STATUS_SUCCESS;
 }
@@ -2605,8 +2620,37 @@ static const struct btp_handler handlers[] = {
 
 uint8_t tester_init_gatt(void)
 {
+	/* Reset GATT database state for re-registration */
+	if (server_buf) {
+		LOG_INF(">>> tester_init_gatt: re-init, resetting GATT DB state");
+
+		/* Unregister any previously registered services */
+		for (int i = 0; i < svc_count; i++) {
+			if (server_svcs[i].attr_count) {
+				z_api(bt_gatt_service_unregister)(&server_svcs[i]);
+			}
+		}
+
+		/* Reset all static state */
+		memset(server_db, 0, sizeof(server_db));
+		memset(server_svcs, 0, sizeof(server_svcs));
+		attr_count = 0;
+		svc_attr_count = 0;
+		svc_count = 0;
+		ccc_added = false;
+
+		/* Reset server_buf: re-reserve from start */
+		net_buf_reset(server_buf);
+		net_buf_reserve(server_buf, SERVER_BUF_SIZE);
+
+		tester_register_command_handlers(BTP_SERVICE_ID_GATT, handlers,
+						 ARRAY_SIZE(handlers));
+		return BTP_STATUS_SUCCESS;
+	}
+
 	server_buf = net_buf_alloc(&server_pool, K_NO_WAIT);
 	if (!server_buf) {
+		LOG_ERR(">>> tester_init_gatt: net_buf_alloc failed");
 		return BTP_STATUS_FAILED;
 	}
 
@@ -2615,6 +2659,7 @@ uint8_t tester_init_gatt(void)
 	tester_register_command_handlers(BTP_SERVICE_ID_GATT, handlers,
 					 ARRAY_SIZE(handlers));
 
+	LOG_INF(">>> tester_init_gatt: SUCCESS");
 	return BTP_STATUS_SUCCESS;
 }
 

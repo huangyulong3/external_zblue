@@ -374,6 +374,12 @@ struct bt_conn *bt_conn_new(struct bt_dev *hdev, struct bt_conn *conns, size_t s
 	}
 
 	if (!conn) {
+		LOG_ERR("[conn_dbg] bt_conn_new: pool FULL (size=%zu)", size);
+		for (i = 0; i < size; i++) {
+			LOG_ERR("[conn_dbg] slot[%d]: ref=%d state=%d type=%d handle=%u",
+				i, atomic_get(&conns[i].ref), conns[i].state,
+				conns[i].type, conns[i].handle);
+		}
 		return NULL;
 	}
 
@@ -1032,8 +1038,6 @@ void bt_conn_suspend_tx(bool suspend)
 	_suspend_tx = suspend;
 
 	LOG_DBG("%sing all data TX", suspend ? "suspend" : "resum");
-
-	bt_tx_irq_raise(conn->hdev);
 }
 #endif	/* CONFIG_BT_TESTING */
 
@@ -1874,6 +1878,8 @@ void bt_conn_notify_connected(struct bt_conn *conn)
 
 void bt_conn_connected(struct bt_conn *conn)
 {
+	LOG_INF("[conn_dbg] bt_conn_connected: conn=%p type=%u handle=%u",
+		conn, conn->type, conn->handle);
 	schedule_auto_initiated_procedures(conn);
 	bt_l2cap_connected(conn);
 
@@ -2137,11 +2143,13 @@ bool le_param_req(struct bt_conn *conn, struct bt_le_conn_param *param)
 static int send_conn_le_param_update(struct bt_conn *conn,
 				const struct bt_le_conn_param *param)
 {
-	LOG_DBG("conn %p features 0x%02x params (%d-%d %d %d)", conn, conn->le.features[0],
+	LOG_INF("[param_dbg] send_conn_le_param_update: conn=%p features=0x%02x params(%d-%d %d %d)",
+		conn, conn->le.features[0],
 		param->interval_min, param->interval_max, param->latency, param->timeout);
 
 	/* Proceed only if connection parameters contains valid values*/
 	if (!bt_le_conn_params_valid(param)) {
+		LOG_ERR("[param_dbg] params INVALID");
 		return -EINVAL;
 	}
 
@@ -2154,6 +2162,7 @@ static int send_conn_le_param_update(struct bt_conn *conn,
 	     (conn->role == BT_HCI_ROLE_CENTRAL)) {
 		int rc;
 
+		LOG_INF("[param_dbg] using HCI LE Connection Update");
 		rc = bt_conn_le_conn_update(conn, param);
 
 		/* store those in case of fallback to L2CAP */
@@ -2163,6 +2172,7 @@ static int send_conn_le_param_update(struct bt_conn *conn,
 			conn->le.pending_latency = param->latency;
 			conn->le.pending_timeout = param->timeout;
 		}
+		LOG_INF("[param_dbg] HCI conn update rc=%d", rc);
 
 		return rc;
 	}
@@ -2170,7 +2180,12 @@ static int send_conn_le_param_update(struct bt_conn *conn,
 	/* If remote central does not support LL Connection Parameters Request
 	 * Procedure
 	 */
-	return bt_l2cap_update_conn_param(conn, param);
+	LOG_INF("[param_dbg] using L2CAP Connection Parameter Update Request");
+	{
+		int rc = bt_l2cap_update_conn_param(conn, param);
+		LOG_INF("[param_dbg] L2CAP param update rc=%d", rc);
+		return rc;
+	}
 }
 
 #if defined(CONFIG_BT_ISO_UNICAST)
@@ -2344,6 +2359,24 @@ static void deferred_work(struct k_work *work)
 	}
 
 	atomic_set_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_UPDATE);
+}
+
+/* Trigger deferred param update from external context (z_api layer).
+ * Sets the PARAM_SET flag and reschedules deferred_work so it runs
+ * in Zephyr's syswq thread where L2CAP operations are safe.
+ */
+void bt_conn_le_param_update_set(struct bt_conn *conn,
+	uint16_t min, uint16_t max, uint16_t latency, uint16_t timeout)
+{
+	if (!conn) return;
+	conn->le.interval_min = min;
+	conn->le.interval_max = max;
+	conn->le.pending_latency = latency;
+	conn->le.pending_timeout = timeout;
+	atomic_set_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_SET);
+	k_work_reschedule(&conn->deferred_work, K_MSEC(100));
+	LOG_INF("[param_dbg] bt_conn_le_param_update_set: scheduled for conn=%p params(%d-%d %d %d)",
+		conn, min, max, latency, timeout);
 }
 
 static struct bt_conn *acl_conn_new(struct bt_dev *hdev)
@@ -3719,7 +3752,8 @@ int bt_conn_le_param_update(struct bt_conn *conn,
 		return -EINVAL;
 	}
 
-	LOG_DBG("conn %p features 0x%02x params (%d-%d %d %d)", conn, conn->le.features[0],
+	LOG_INF("[param_dbg] bt_conn_le_param_update: conn=%p role=%d state=%d params(%d-%d %d %d)",
+		conn, conn->role, conn->state,
 		param->interval_min, param->interval_max, param->latency, param->timeout);
 
 	if (IS_ENABLED(CONFIG_BT_CENTRAL) &&
@@ -3728,17 +3762,12 @@ int bt_conn_le_param_update(struct bt_conn *conn,
 	}
 
 	if (IS_ENABLED(CONFIG_BT_PERIPHERAL)) {
-		/* if peripheral conn param update timer expired just send request */
-		if (atomic_test_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_UPDATE)) {
-			return send_conn_le_param_update(conn, param);
-		}
-
-		/* store new conn params to be used by update timer */
-		conn->le.interval_min = param->interval_min;
-		conn->le.interval_max = param->interval_max;
-		conn->le.pending_latency = param->latency;
-		conn->le.pending_timeout = param->timeout;
-		atomic_set_bit(conn->flags, BT_CONN_PERIPHERAL_PARAM_SET);
+		/* Always send immediately - deferred_work timer doesn't work
+		 * reliably in z_api architecture where connections are managed
+		 * by the framework layer.
+		 */
+		LOG_INF("[param_dbg] peripheral: sending param update immediately");
+		return send_conn_le_param_update(conn, param);
 	}
 
 	return 0;

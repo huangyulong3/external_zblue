@@ -28,7 +28,7 @@
  * provided by the z_port layer (frameworks/connectivity/bluetooth/z_port).
  */
 
-#ifdef CONFIG_Z_API_USE_FRAMEWORK
+#ifndef CONFIG_Z_API_USE_FRAMEWORK
 
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/bluetooth/conn.h>
@@ -359,5 +359,21 @@ int z_bt_eatt_disconnect_one(struct bt_conn *conn)
     return -ENOTSUP;
 }
 #endif
+
+/* OOB flag APIs - these are custom z_api extensions, not direct Zephyr API wrappers */
+static bool _sc_oob_flag;
+static bool _legacy_oob_flag;
+
+int z_bt_le_oob_set_sc_flag(bool enable)
+{
+    _sc_oob_flag = enable;
+    return 0;
+}
+
+int z_bt_le_oob_set_legacy_flag(bool enable)
+{
+    _legacy_oob_flag = enable;
+    return 0;
+}
 
 #endif /* !CONFIG_Z_API_USE_FRAMEWORK */

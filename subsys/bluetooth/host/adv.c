@@ -329,6 +329,10 @@ int bt_le_adv_set_enable_legacy(struct bt_le_ext_adv *adv, bool enable)
 	struct bt_hci_cmd_state_set state;
 	int err;
 
+	LOG_INF("[adv_dbg] set_enable_legacy: enable=%d adv_flags=0x%lx BT_ADV_ENABLED=%d",
+		enable, atomic_get(adv->flags),
+		atomic_test_bit(adv->flags, BT_ADV_ENABLED));
+
 	buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_ADV_ENABLE, 1);
 	if (!buf) {
 		return -ENOBUFS;
@@ -558,6 +562,15 @@ static int hci_set_ad(struct bt_dev *hdev, uint16_t hci_op, const struct bt_ad *
 	if (err) {
 		net_buf_unref(buf);
 		return err;
+	}
+
+	/* Debug: dump AD data being sent to controller */
+	{
+		char hex[96] = {0};
+		int n = set_data->len < 31 ? set_data->len : 31;
+		for (int i = 0; i < n; i++)
+			snprintf(hex + i*3, 4, "%02x ", set_data->data[i]);
+		LOG_INF("[adv] hci_set_ad: op=0x%04x len=%d data: %s", hci_op, set_data->len, hex);
 	}
 
 	return bt_hci_cmd_send_sync(hdev, hci_op, buf, NULL);
@@ -941,6 +954,7 @@ static int le_adv_start_add_conn(const struct bt_le_ext_adv *adv,
 		/* Undirected advertising */
 		conn = bt_conn_add_le(hdev, adv->id, BT_ADDR_LE_NONE);
 		if (!conn) {
+			LOG_ERR("[conn_dbg] le_adv_start_add_conn: bt_conn_add_le FAILED (adv->id=%d)", adv->id);
 			return -ENOMEM;
 		}
 
@@ -995,8 +1009,42 @@ int bt_le_adv_start_legacy(struct bt_le_ext_adv *adv,
 
 	int err;
 
+	LOG_INF("[adv] bt_le_adv_start_legacy: options=0x%x ad_len=%zu sd_len=%zu",
+		param->options, ad_len, sd_len);
+
 	if (!atomic_test_bit(adv->hdev->flags, BT_DEV_READY)) {
 		return -EAGAIN;
+	}
+
+	/* Force-disable advertising on controller to avoid CMD_DISALLOWED.
+	 * This handles the case where controller is still advertising
+	 * (e.g. auto-resumed after disconnect) but host lost track of it.
+	 */
+	if (!atomic_test_bit(adv->flags, BT_ADV_ENABLED)) {
+		struct net_buf *disable_buf;
+		disable_buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_ADV_ENABLE, 1);
+		if (disable_buf) {
+			net_buf_add_u8(disable_buf, BT_HCI_LE_ADV_DISABLE);
+			(void)bt_hci_cmd_send_sync(adv->hdev, BT_HCI_OP_LE_SET_ADV_ENABLE,
+						   disable_buf, NULL);
+			LOG_INF("[adv] force-disabled controller advertising (sync host state)");
+		}
+		/* Also toggle address resolution off/on to reset controller state.
+		 * Some controllers (nRF54L15) need this when switching to own_addr_type=0x03.
+		 */
+		struct net_buf *ar_buf;
+		ar_buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_ADDR_RES_ENABLE, 1);
+		if (ar_buf) {
+			net_buf_add_u8(ar_buf, 0); /* disable */
+			(void)bt_hci_cmd_send_sync(adv->hdev, BT_HCI_OP_LE_SET_ADDR_RES_ENABLE,
+						   ar_buf, NULL);
+		}
+		ar_buf = bt_hci_cmd_create(BT_HCI_OP_LE_SET_ADDR_RES_ENABLE, 1);
+		if (ar_buf) {
+			net_buf_add_u8(ar_buf, 1); /* enable */
+			(void)bt_hci_cmd_send_sync(adv->hdev, BT_HCI_OP_LE_SET_ADDR_RES_ENABLE,
+						   ar_buf, NULL);
+		}
 	}
 
 	if (!valid_adv_param(adv->hdev, param)) {
@@ -1065,10 +1113,17 @@ int bt_le_adv_start_legacy(struct bt_le_ext_adv *adv,
 
 	net_buf_add_mem(buf, &set_param, sizeof(set_param));
 
+	LOG_INF("[adv] HCI adv_param: type=%d own_addr_type=%d interval=[%d,%d] scannable=%d",
+		set_param.type, set_param.own_addr_type,
+		sys_le16_to_cpu(set_param.min_interval),
+		sys_le16_to_cpu(set_param.max_interval), scannable);
+
 	err = bt_hci_cmd_send_sync(adv->hdev, BT_HCI_OP_LE_SET_ADV_PARAM, buf, NULL);
 	if (err) {
+		LOG_ERR("[adv] LE_SET_ADV_PARAM failed: err=%d", err);
 		return err;
 	}
+	LOG_INF("[adv] LE_SET_ADV_PARAM success");
 
 	if (!dir_adv) {
 		err = le_adv_update(adv, ad, ad_len, sd, sd_len, false,
@@ -1093,7 +1148,9 @@ int bt_le_adv_start_legacy(struct bt_le_ext_adv *adv,
 
 	err = bt_le_adv_set_enable(adv, true);
 	if (err) {
-		LOG_ERR("Failed to start advertiser");
+		LOG_ERR("Failed to start advertiser: err=%d", err);
+		LOG_ERR("[adv] adv_flags=0x%lx own_addr_type=%d",
+			atomic_get(adv->flags), set_param.own_addr_type);
 		if (IS_ENABLED(CONFIG_BT_PERIPHERAL) && conn) {
 			bt_conn_set_state(conn, BT_CONN_DISCONNECTED);
 			bt_conn_unref(conn);

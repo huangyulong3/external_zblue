@@ -362,6 +362,9 @@ int bt_id_set_private_addr(struct bt_dev *hdev, uint8_t id)
 
 	err = bt_rpa_create(hdev->irk[id], &rpa);
 	if (!err) {
+		LOG_INF("[rpa_dbg] bt_rpa_create: irk=%02x%02x%02x%02x...%02x%02x rpa=%s",
+			hdev->irk[id][0], hdev->irk[id][1], hdev->irk[id][2], hdev->irk[id][3],
+			hdev->irk[id][14], hdev->irk[id][15], bt_addr_str(&rpa));
 		err = set_random_address(hdev, &rpa);
 		if (!err) {
 			atomic_set_bit(hdev->flags, BT_DEV_RPA_VALID);
@@ -1598,15 +1601,22 @@ uint8_t bt_id_read_public_addr(struct bt_dev *hdev, bt_addr_le_t *addr)
 
 	rp = (void *)rsp->data;
 
+	LOG_INF("[pub_addr] READ_BD_ADDR returned: %02x:%02x:%02x:%02x:%02x:%02x",
+		rp->bdaddr.val[5], rp->bdaddr.val[4], rp->bdaddr.val[3],
+		rp->bdaddr.val[2], rp->bdaddr.val[1], rp->bdaddr.val[0]);
+
 	if (bt_addr_eq(&rp->bdaddr, BT_ADDR_ANY) ||
 	    bt_addr_eq(&rp->bdaddr, BT_ADDR_NONE)) {
-		LOG_DBG("Controller has no public address");
+		LOG_INF("[pub_addr] Controller has no public address (all zeros/ff)");
 		net_buf_unref(rsp);
 		return 0U;
 	}
 
 	bt_addr_copy(&addr->a, &rp->bdaddr);
 	addr->type = BT_ADDR_LE_PUBLIC;
+	LOG_INF("[pub_addr] Using public address: %02x:%02x:%02x:%02x:%02x:%02x",
+		addr->a.val[5], addr->a.val[4], addr->a.val[3],
+		addr->a.val[2], addr->a.val[1], addr->a.val[0]);
 
 	net_buf_unref(rsp);
 	return 1U;
@@ -2014,7 +2024,10 @@ int bt_id_set_adv_own_addr(struct bt_le_ext_adv *adv, uint32_t options,
 				return err;
 			}
 
-			if (dir_adv && (options & BT_LE_ADV_OPT_DIR_ADDR_RPA)) {
+			if (BT_FEAT_LE_PRIVACY(hdev->le.features)) {
+				*own_addr_type = BT_HCI_OWN_ADDR_RPA_OR_RANDOM;
+				LOG_INF("[rpa_dbg] using OWN_ADDR_RPA_OR_RANDOM (0x03)");
+			} else if (dir_adv && (options & BT_LE_ADV_OPT_DIR_ADDR_RPA)) {
 				*own_addr_type = BT_HCI_OWN_ADDR_RPA_OR_RANDOM;
 			} else {
 				*own_addr_type = BT_HCI_OWN_ADDR_RANDOM;

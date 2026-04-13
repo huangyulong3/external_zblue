@@ -237,6 +237,78 @@ extern int z_api(bt_l2cap_ecred_chan_reconfigure)(struct bt_l2cap_chan **chans,
 extern int z_api(bt_eatt_connect)(struct bt_conn *conn, size_t num_channels);
 extern int z_api(bt_eatt_disconnect_one)(struct bt_conn *conn);
 
+/* ============================================================
+ * BR/EDR GAP APIs
+ * ============================================================ */
+
+/* BR/EDR connection create */
+extern int z_bt_conn_create(const void *peer, void **ret_conn);
+
+/* BR/EDR discovery */
+extern int z_bt_br_discovery_start(uint32_t timeout);
+extern int z_bt_br_discovery_stop(void);
+
+/* ============================================================
+ * SPP / RFCOMM APIs
+ * ============================================================ */
+
+extern int z_bt_spp_connect(const uint8_t *addr, uint8_t channel);
+extern int z_bt_spp_disconnect(const uint8_t *addr);
+extern int z_bt_spp_listen(uint8_t channel);
+extern int z_bt_spp_send(const uint8_t *addr, const uint8_t *data, uint16_t len);
+extern int z_bt_rfcomm_connect(const uint8_t *addr, uint8_t channel);
+extern int z_bt_rfcomm_send(const uint8_t *addr, const uint8_t *data, uint16_t len);
+
+/* ============================================================
+ * A2DP APIs
+ * ============================================================ */
+
+extern int z_bt_a2dp_connect(const uint8_t *addr);
+extern int z_bt_a2dp_disconnect(const uint8_t *addr);
+extern int z_bt_a2dp_start(const uint8_t *addr);
+extern int z_bt_a2dp_stop(const uint8_t *addr);
+
+/* ============================================================
+ * AVRCP APIs
+ * ============================================================ */
+
+extern int z_bt_avrcp_connect(const uint8_t *addr);
+extern int z_bt_avrcp_disconnect(const uint8_t *addr);
+extern int z_bt_avrcp_passthrough(const uint8_t *addr,
+                                  uint8_t key_id, uint8_t key_state);
+extern int z_bt_avrcp_get_element_attrs(const uint8_t *addr);
+
+/* ============================================================
+ * HFP APIs
+ * ============================================================ */
+
+extern int z_bt_hfp_connect(const uint8_t *addr);
+extern int z_bt_hfp_disconnect(const uint8_t *addr);
+extern int z_bt_hfp_answer(const uint8_t *addr);
+extern int z_bt_hfp_reject(const uint8_t *addr);
+extern int z_bt_hfp_dial(const uint8_t *addr, const char *number);
+extern int z_bt_hfp_set_volume(const uint8_t *addr,
+                               uint8_t type, uint8_t volume);
+extern int z_bt_hfp_send_dtmf(const uint8_t *addr, uint8_t code);
+
+/* ============================================================
+ * PAN APIs
+ * ============================================================ */
+
+extern int z_bt_pan_connect(const uint8_t *addr);
+extern int z_bt_pan_disconnect(const uint8_t *addr);
+extern int z_bt_pan_set_role(uint8_t role);
+
+/* ============================================================
+ * HID APIs
+ * ============================================================ */
+
+extern int z_bt_hid_register(uint8_t sub_class);
+extern int z_bt_hid_connect(const uint8_t *addr);
+extern int z_bt_hid_disconnect(const uint8_t *addr);
+extern int z_bt_hid_send_report(const uint8_t *addr, uint8_t report_id,
+                                const uint8_t *data, uint16_t len);
+
 #ifdef __cplusplus
 }
 #endif

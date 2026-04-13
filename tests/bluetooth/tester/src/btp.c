@@ -116,12 +116,20 @@ static void cmd_handler(void *p1, void *p2, void *p3)
 		btp = find_btp_handler(cmd->hdr.service, cmd->hdr.opcode);
 		if (btp) {
 			if (btp->index != cmd->hdr.index) {
+				LOG_WRN(">>> cmd_handler: index mismatch: btp->index=0x%02x cmd->index=0x%02x",
+					btp->index, cmd->hdr.index);
 				status = BTP_STATUS_FAILED;
 			} else if ((btp->expect_len >= 0) && (btp->expect_len != len)) {
+				LOG_WRN(">>> cmd_handler: len mismatch: expect=%d got=%d",
+					btp->expect_len, len);
 				status = BTP_STATUS_FAILED;
 			} else {
+				LOG_INF(">>> cmd_handler: calling func=%p for svc=0x%02x op=0x%02x",
+					btp->func, cmd->hdr.service, cmd->hdr.opcode);
 				status = btp->func(cmd->hdr.data, len,
 						   cmd->rsp, &rsp_len);
+				LOG_INF(">>> cmd_handler: func returned status=%d rsp_len=%d",
+					status, rsp_len);
 			}
 
 			__ASSERT_NO_MSG((rsp_len + sizeof(struct btp_hdr)) <= BTP_MTU);
@@ -213,6 +221,10 @@ static void *btp_rx_thread_func(void *arg)
 				btp_client_fd = accept(btp_server_fd, NULL, NULL);
 				if (btp_client_fd >= 0) {
 					LOG_INF("BTP client connected (fd=%d)", btp_client_fd);
+					/* Send IUT Ready event to new client */
+					tester_event(BTP_SERVICE_ID_CORE,
+						     BTP_CORE_EV_IUT_READY,
+						     NULL, 0);
 				}
 			}
 			continue;
@@ -234,11 +246,14 @@ static void *btp_rx_thread_func(void *arg)
 				LOG_INF("BTP client disconnected");
 				close(btp_client_fd);
 				btp_client_fd = -1;
+				/* Reset registered services so next client can re-register */
+				recv_off = 0;
 			} else {
 				if (errno != EAGAIN && errno != EWOULDBLOCK) {
 					LOG_ERR("BTP read error: %d", errno);
 					close(btp_client_fd);
 					btp_client_fd = -1;
+					recv_off = 0;
 				}
 			}
 		}
@@ -322,6 +337,12 @@ void tester_init(void)
 
 	LOG_DBG("Initializing tester");
 
+	/* Reinitialize static state (NuttX flat build: statics persist across task restarts) */
+	btp_server_fd = -1;
+	btp_client_fd = -1;
+	btp_running = false;
+	recv_off = 0;
+
 	for (i = 0; i < CMD_QUEUED; i++) {
 		k_fifo_put(&avail_queue, &cmd_buf[i]);
 	}
@@ -336,8 +357,8 @@ void tester_init(void)
 	/* core service is always available */
 	tester_init_core();
 
-	tester_send_with_index(BTP_SERVICE_ID_CORE, BTP_CORE_EV_IUT_READY,
-			      BTP_INDEX_NONE, NULL, 0);
+	/* IUT_READY is sent by btp_rx_thread when a client connects,
+	 * not here — no client is connected yet at init time. */
 }
 
 int tester_rsp_buffer_lock(void)
